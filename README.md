@@ -190,7 +190,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 For questions or collaboration opportunities, please contact:
-- Mario Sumali: [email]
+- Mario Sumali: [msumali@stanford.edu]
 - Shane Mion: [email]
 
 ---
