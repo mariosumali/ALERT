@@ -1,0 +1,56 @@
+# Multimedia Event Parsing Requirements
+
+## Core Dependencies
+numpy>=1.21.0
+scipy>=1.7.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+
+## Audio Processing
+librosa>=0.9.0
+soundfile>=0.10.0
+pyaudio>=0.2.11
+webrtcvad>=2.0.10
+speechrecognition>=3.8.0
+
+## Video Processing
+opencv-python>=4.5.0
+moviepy>=1.0.3
+imageio>=2.9.0
+pillow>=8.3.0
+
+## Machine Learning
+torch>=1.9.0
+torchaudio>=0.9.0
+transformers>=4.12.0
+huggingface-hub>=0.4.0
+
+## Natural Language Processing
+nltk>=3.6.0
+spacy>=3.4.0
+textblob>=0.17.0
+
+## Data Processing
+h5py>=3.1.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+plotly>=5.3.0
+
+## Utilities
+tqdm>=4.62.0
+click>=8.0.0
+pyyaml>=5.4.0
+python-dotenv>=0.19.0
+requests>=2.25.0
+
+## Development & Testing
+pytest>=6.2.0
+pytest-cov>=2.12.0
+black>=21.0.0
+flake8>=3.9.0
+mypy>=0.910
+
+## Optional GPU Support
+# Uncomment for CUDA support
+# torch-audio-gpu>=0.9.0
+# torch-gpu>=1.9.0
