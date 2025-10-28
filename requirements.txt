@@ -42,6 +42,11 @@ click>=8.0.0
 pyyaml>=5.4.0
 python-dotenv>=0.19.0
 requests>=2.25.0
+gdown>=4.6.0  # Google Drive downloads
+openpyxl>=3.0.0  # Excel file support
+
+# GUI (tkinter typically included with Python)
+# If not available on your system, install: python3-tk
 
 ## Development & Testing
 pytest>=6.2.0
