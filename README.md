@@ -99,4 +99,20 @@ Co-occurring anomalies, low-activity stretches, cross-modal context changes
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Stanford CS224V course staff
+- Police Records Access Project
+- Open source multimedia processing libraries
+
+## Contact
+
+For questions or collaboration opportunities, please contact:
+- Mario Sumali: [email]
+- Shane Mion: [email]
+
+---
+
+*This project is part of Stanford CS224V - Multimedia Event Parsing course work.*
