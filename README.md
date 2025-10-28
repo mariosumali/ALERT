@@ -23,8 +23,9 @@ python -c "from src.data_ingestion.sjpd_loader import SJPDLoader; \
 ## Dataset
 
 SJPD spreadsheets in `src/spreadsheets/`:
-- **videos w_ links.csv**: Video metadata with Google Drive links
-- **transcripts.csv**: Transcript text for videos
+- **transcripts.csv**: 21,000+ videos with Google Drive IDs and transcripts (primary source)
+- **videos w_ links.csv**: ~100 videos with detailed metadata (duration, descriptions, case info)
+- Browser cross-references both to show complete information
 
 ## Key Features
 

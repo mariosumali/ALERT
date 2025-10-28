@@ -1,7 +1,11 @@
 """
-Interactive Video Browser and Download Manager
+Enhanced Video Browser and Download Manager
 
-GUI application for browsing SJPD videos and downloading from Google Drive.
+GUI application that combines data from:
+1. Transcripts spreadsheet 
+2. Videos with links spreadsheet
+
+Cross-references both datasets to provide complete video information.
 """
 
 import tkinter as tk
@@ -11,13 +15,14 @@ from pathlib import Path
 import webbrowser
 import subprocess
 import os
+import re
 
 
 class VideoBrowser:
     def __init__(self, root):
         self.root = root
-        self.root.title("SJPD Video Browser")
-        self.root.geometry("1000x700")
+        self.root.title("SJPD Video Browser - Enhanced")
+        self.root.geometry("1200x800")
         
         # Load data
         self.load_data()
@@ -30,51 +35,63 @@ class VideoBrowser:
         self.display_video(0)
     
     def load_data(self):
-        """Load SJPD video data from spreadsheets"""
+        """Load and merge data from both spreadsheets"""
         print("Loading spreadsheets...")
         
         try:
-            # Load videos spreadsheet
-            videos_path = "src/spreadsheets/[CS224V copy] SJPD Logging Videos - videos w_ links.csv"
-            self.videos_df = pd.read_csv(videos_path, encoding='utf-8', on_bad_lines='skip')
-            
-            # Load transcripts
+            # Load transcripts spreadsheet (primary source - has more videos)
             transcripts_path = "src/spreadsheets/[CS224V copy] SJPD Logging Videos - transcripts.csv"
             self.transcripts_df = pd.read_csv(transcripts_path, encoding='utf-8', on_bad_lines='skip')
+            print(f"  Loaded {len(self.transcripts_df)} rows from transcripts")
             
-            # Create lookup for transcripts
-            self.transcript_lookup = {}
-            for _, row in self.transcripts_df.iterrows():
-                gdrive_id = row.get('gdrive_id', '')
-                if pd.notna(gdrive_id) and gdrive_id:
-                    transcript = row.get('first_look_summary', '')
-                    self.transcript_lookup[gdrive_id] = transcript if pd.notna(transcript) else ''
+            # Load videos with links spreadsheet (secondary source - has metadata)
+            videos_path = "src/spreadsheets/[CS224V copy] SJPD Logging Videos - videos w_ links.csv"
+            self.videos_df = pd.read_csv(videos_path, encoding='utf-8', on_bad_lines='skip')
+            print(f"  Loaded {len(self.videos_df)} rows from videos")
             
-            # Extract file IDs and prepare video list
-            self.videos = []
+            # Create lookup for videos metadata by gdrive_id
+            self.videos_lookup = {}
             for idx, row in self.videos_df.iterrows():
                 asset_url = row.get('asset_url', '')
                 file_id = self.extract_file_id(asset_url)
-                
                 if file_id:
-                    self.videos.append({
+                    self.videos_lookup[file_id] = {
                         'index': idx,
-                        'file_id': file_id,
-                        'row': row,
-                        'transcript': self.transcript_lookup.get(file_id, 'No transcript available')
-                    })
+                        'row': row
+                    }
             
-            print(f"Loaded {len(self.videos)} videos")
-            self.status = f"Loaded {len(self.videos)} videos"
+            # Build combined video list from transcripts
+            self.videos = []
+            for idx, row in self.transcripts_df.iterrows():
+                gdrive_id = row.get('gdrive_id', '')
+                if pd.notna(gdrive_id) and gdrive_id:
+                    # Get metadata from videos spreadsheet if available
+                    video_metadata = self.videos_lookup.get(gdrive_id, {})
+                    
+                    video_info = {
+                        'index': idx,
+                        'file_id': gdrive_id,
+                        'transcript_row': row,
+                        'metadata_row': video_metadata.get('row', None),
+                        'has_metadata': gdrive_id in self.videos_lookup,
+                    }
+                    
+                    self.videos.append(video_info)
+            
+            print(f"\n✓ Loaded {len(self.videos)} videos")
+            print(f"  Videos with full metadata: {sum(1 for v in self.videos if v['has_metadata'])}")
+            print(f"  Videos only in transcripts: {sum(1 for v in self.videos if not v['has_metadata'])}")
+            
+            self.status = f"Loaded {len(self.videos)} videos ({sum(1 for v in self.videos if v['has_metadata'])} with metadata)"
             
         except Exception as e:
-            print(f"Error loading data: {e}")
+            import traceback
+            traceback.print_exc()
             self.videos = []
             self.status = f"Error loading data: {e}"
     
     def extract_file_id(self, asset_url):
         """Extract Google Drive file ID from URL"""
-        import re
         if pd.isna(asset_url):
             return None
         
@@ -88,53 +105,84 @@ class VideoBrowser:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        # Top info bar
+        info_bar = ttk.Frame(main_frame)
+        info_bar.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        self.status_label = ttk.Label(info_bar, text=self.status, font=('Arial', 10))
+        self.status_label.pack(side=tk.LEFT)
+        
+        ttk.Label(info_bar, text="Search:", font=('Arial', 10)).pack(side=tk.LEFT, padx=(20, 5))
+        self.search_entry = ttk.Entry(info_bar, width=30)
+        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.bind('<KeyRelease>', self.search_videos)
+        
+        ttk.Button(info_bar, text="Go", command=self.search_videos).pack(side=tk.LEFT, padx=5)
+        
         # Navigation frame
         nav_frame = ttk.Frame(main_frame)
-        nav_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        nav_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         self.prev_btn = ttk.Button(nav_frame, text="← Previous", command=self.prev_video)
-        self.prev_btn.grid(row=0, column=0, padx=5)
+        self.prev_btn.pack(side=tk.LEFT, padx=5)
         
         self.current_label = ttk.Label(nav_frame, text="")
-        self.current_label.grid(row=0, column=1, padx=20)
+        self.current_label.pack(side=tk.LEFT, padx=20)
         
         self.next_btn = ttk.Button(nav_frame, text="Next →", command=self.next_video)
-        self.next_btn.grid(row=0, column=2, padx=5)
+        self.next_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Filter buttons
+        filter_frame = ttk.Frame(nav_frame)
+        filter_frame.pack(side=tk.RIGHT, padx=10)
+        
+        ttk.Button(filter_frame, text="Has Transcript", 
+                   command=self.filter_transcripts).pack(side=tk.LEFT, padx=2)
+        ttk.Button(filter_frame, text="Has Metadata", 
+                   command=self.filter_metadata).pack(side=tk.LEFT, padx=2)
+        ttk.Button(filter_frame, text="All Videos", 
+                   command=self.filter_all).pack(side=tk.LEFT, padx=2)
         
         # Video info frame
         info_frame = ttk.LabelFrame(main_frame, text="Video Information", padding="10")
-        info_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        info_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
-        self.info_text = scrolledtext.ScrolledText(info_frame, width=60, height=20, wrap=tk.WORD)
+        self.info_text = scrolledtext.ScrolledText(info_frame, width=60, height=25, wrap=tk.WORD)
         self.info_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         info_frame.columnconfigure(0, weight=1)
         info_frame.rowconfigure(0, weight=1)
         
         # Actions frame
         actions_frame = ttk.LabelFrame(main_frame, text="Actions", padding="10")
-        actions_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N), padx=(5, 0))
+        actions_frame.grid(row=2, column=1, sticky=(tk.W, tk.E, tk.N))
         
         ttk.Button(actions_frame, text="Open in Google Drive", 
-                   command=self.open_drive, width=30).grid(row=0, column=0, pady=5, sticky=(tk.W, tk.E))
+                   command=self.open_drive, width=35).grid(row=0, column=0, pady=5, sticky=(tk.W, tk.E))
         
         ttk.Button(actions_frame, text="Copy Download Link", 
-                   command=self.copy_link, width=30).grid(row=1, column=0, pady=5, sticky=(tk.W, tk.E))
+                   command=self.copy_link, width=35).grid(row=1, column=0, pady=5, sticky=(tk.W, tk.E))
         
         ttk.Button(actions_frame, text="Download with gdown", 
-                   command=self.download_gdown, width=30).grid(row=2, column=0, pady=5, sticky=(tk.W, tk.E))
+                   command=self.download_gdown, width=35).grid(row=2, column=0, pady=5, sticky=(tk.W, tk.E))
         
         ttk.Separator(actions_frame, orient='horizontal').grid(row=3, column=0, sticky=(tk.W, tk.E), pady=10)
         
         ttk.Button(actions_frame, text="Show Transcript", 
-                   command=self.show_transcript, width=30).grid(row=4, column=0, pady=5, sticky=(tk.W, tk.E))
+                   command=self.show_transcript, width=35).grid(row=4, column=0, pady=5, sticky=(tk.W, tk.E))
+        
+        ttk.Button(actions_frame, text="Open Metadata", 
+                   command=self.show_metadata, width=35).grid(row=5, column=0, pady=5, sticky=(tk.W, tk.E))
         
         # Grid weights
         main_frame.columnconfigure(0, weight=2)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
         
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        
+        # Store original video list for filtering
+        self.all_videos = self.videos[:]
     
     def display_video(self, idx):
         """Display video at index"""
@@ -145,7 +193,6 @@ class VideoBrowser:
         
         self.current_idx = idx
         video = self.videos[idx]
-        row = video['row']
         
         # Update navigation label
         self.current_label.config(text=f"Video {idx + 1} of {len(self.videos)}")
@@ -153,49 +200,131 @@ class VideoBrowser:
         # Build info text
         info = []
         info.append(f"📹 VIDEO {idx + 1} of {len(self.videos)}")
-        info.append("=" * 60)
+        info.append("=" * 70)
         info.append("")
         
-        # Extract and display key information
-        fields_to_show = [
-            ('Case', 'Case'),
-            ('SJPD Case ID', 'SJPD Case ID'),
-            ('Video Name', 'Video'),
-            ('Length', 'Length'),
-            ('Duration (mins)', 'Video length minutes'),
-            ('Description', 'Description'),
-            ('Internal Description', 'case_internal_description'),
-            ('Publication Summary', 'case_summary_publication'),
-        ]
+        # Get data sources
+        transcript_row = video['transcript_row']
+        metadata_row = video.get('metadata_row')
         
-        for label, key in fields_to_show:
-            value = row.get(key, '')
-            if pd.notna(value) and value:
-                info.append(f"{label}:")
-                info.append(f"  {value}")
-                info.append("")
+        # File information (always available from transcripts)
+        info.append("FILE INFORMATION:")
+        info.append(f"  Google Drive ID: {video['file_id']}")
         
-        # File info
-        info.append("File Information:")
-        info.append(f"  File ID: {video['file_id']}")
-        info.append(f"  MIME Type: {row.get('mimeType', 'N/A')}")
-        info.append(f"  SHA1: {row.get('sha1', 'N/A')[:20]}...")
+        # Get values with proper handling of NaN
+        video_name = transcript_row.get('gdrive_name', 'N/A')
+        if pd.notna(video_name):
+            info.append(f"  Video Name: {video_name}")
+        else:
+            info.append(f"  Video Name: N/A")
+        
+        mime_type = transcript_row.get('mimeType', 'N/A')
+        if pd.notna(mime_type):
+            info.append(f"  MIME Type: {mime_type}")
+        else:
+            info.append(f"  MIME Type: N/A")
+        
+        sha1 = transcript_row.get('sha1', 'N/A')
+        if pd.notna(sha1) and isinstance(sha1, str):
+            info.append(f"  SHA1: {sha1[:20]}...")
+        else:
+            info.append(f"  SHA1: N/A")
+        
+        info.append(f"  Has Metadata: {'✓ Yes' if video['has_metadata'] else '✗ No'}")
         info.append("")
         
-        # Has redaction?
-        if row.get('has redaction'):
-            info.append("⚠️  REDACTED VIDEO")
+        # Show metadata if available
+        if metadata_row:
+            info.append("METADATA FROM VIDEOS SPREADSHEET:")
+            info.append("")
+            
+            fields_to_show = [
+                ('Case ID', 'SJPD Case ID'),
+                ('Case', 'Case'),
+                ('Video', 'Video'),
+                ('Length', 'Length'),
+                ('Duration (min)', 'Video length minutes'),
+                ('Description', 'Description'),
+            ]
+            
+            for label, key in fields_to_show:
+                value = metadata_row.get(key, '')
+                if pd.notna(value) and value:
+                    info.append(f"{label}:")
+                    info.append(f"  {value}")
+                    info.append("")
+        else:
+            info.append("METADATA:")
+            info.append("  Only basic info available (not in videos spreadsheet)")
             info.append("")
         
-        # Transcript info
-        if video['transcript'] and video['transcript'] != 'No transcript available':
-            info.append("Transcript:")
-            info.append(f"  {len(video['transcript'])} characters")
-            info.append("")
+        # Transcript information
+        transcript = transcript_row.get('first_look_summary', '')
+        has_transcript = (pd.notna(transcript) and transcript and 
+                         transcript != 'No transcription available')
+        
+        info.append("TRANSCRIPT:")
+        if has_transcript:
+            info.append(f"  ✓ Available ({len(str(transcript))} characters)")
+            preview = str(transcript)[:200] + "..." if len(transcript) > 200 else str(transcript)
+            info.append(f"  Preview: {preview}")
+        else:
+            info.append("  ✗ No transcript available")
+        info.append("")
+        
+        # Additional info from transcripts
+        case_name = transcript_row.get('provisional_case_name', '')
+        incident_date = transcript_row.get('incident_date', '')
+        
+        if pd.notna(case_name) and case_name and str(case_name) != '✗':
+            info.append(f"Case Name: {case_name}")
+        if pd.notna(incident_date) and incident_date and str(incident_date) != '✗':
+            info.append(f"Incident Date: {incident_date}")
         
         # Display
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(1.0, "\n".join(info))
+    
+    def search_videos(self, event=None):
+        """Search videos by name or case"""
+        query = self.search_entry.get().lower()
+        
+        if not query:
+            self.videos = self.all_videos[:]
+        else:
+            filtered = []
+            for video in self.all_videos:
+                name = str(video['transcript_row'].get('gdrive_name', '')).lower()
+                if query in name:
+                    filtered.append(video)
+            
+            self.videos = filtered
+        
+        if self.videos:
+            self.display_video(0)
+        else:
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(1.0, "No videos found")
+    
+    def filter_transcripts(self):
+        """Filter to videos with transcripts"""
+        self.videos = [v for v in self.all_videos 
+                      if pd.notna(v['transcript_row'].get('first_look_summary', '')) 
+                      and v['transcript_row'].get('first_look_summary', '')]
+        if self.videos:
+            self.display_video(0)
+    
+    def filter_metadata(self):
+        """Filter to videos with full metadata"""
+        self.videos = [v for v in self.all_videos if v['has_metadata']]
+        if self.videos:
+            self.display_video(0)
+    
+    def filter_all(self):
+        """Show all videos"""
+        self.videos = self.all_videos[:]
+        if self.videos:
+            self.display_video(0)
     
     def prev_video(self):
         """Show previous video"""
@@ -226,7 +355,6 @@ class VideoBrowser:
             return
         
         video = self.videos[self.current_idx]
-        # Direct download link
         link = f"https://drive.google.com/uc?export=download&id={video['file_id']}"
         
         self.root.clipboard_clear()
@@ -251,15 +379,14 @@ class VideoBrowser:
             messagebox.showerror("Error", "Unable to check for gdown")
             return
         
-        # Prepare download
+        # Get video name
+        video_name = video['transcript_row'].get('gdrive_name', 'video')
+        safe_name = "".join(c for c in video_name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
+        
         file_id = video['file_id']
-        row = video['row']
-        video_name = row.get('Video', 'video')
         output_dir = Path("data/raw")
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Clean filename
-        safe_name = "".join(c for c in video_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
         output_file = output_dir / f"{safe_name}.mp4"
         
         # Download
@@ -282,20 +409,50 @@ class VideoBrowser:
             return
         
         video = self.videos[self.current_idx]
-        transcript = video['transcript']
+        transcript = video['transcript_row'].get('first_look_summary', '')
         
-        if not transcript or transcript == 'No transcript available':
+        if not transcript or pd.isna(transcript) or transcript == 'No transcription available':
             messagebox.showinfo("No Transcript", "No transcript available for this video")
             return
         
         # Create transcript window
         transcript_window = tk.Toplevel(self.root)
-        transcript_window.title(f"Transcript - {video['row'].get('Video', 'Video')}")
-        transcript_window.geometry("800x600")
+        transcript_window.title(f"Transcript - {video['transcript_row'].get('gdrive_name', 'Video')}")
+        transcript_window.geometry("900x700")
         
         text_widget = scrolledtext.ScrolledText(transcript_window, wrap=tk.WORD, padx=10, pady=10)
         text_widget.pack(fill=tk.BOTH, expand=True)
         text_widget.insert(1.0, transcript)
+        text_widget.config(state=tk.DISABLED)
+    
+    def show_metadata(self):
+        """Show full metadata in a new window"""
+        if not self.videos:
+            return
+        
+        video = self.videos[self.current_idx]
+        
+        metadata_window = tk.Toplevel(self.root)
+        metadata_window.title("Full Metadata")
+        metadata_window.geometry("800x600")
+        
+        text_widget = scrolledtext.ScrolledText(metadata_window, wrap=tk.WORD, padx=10, pady=10)
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        
+        # Show all metadata
+        lines = []
+        lines.append("=== TRANSCRIPT ROW DATA ===")
+        for key, value in video['transcript_row'].items():
+            if pd.notna(value) and value:
+                lines.append(f"{key}: {value}")
+        
+        if video['has_metadata']:
+            lines.append("\n=== METADATA ROW DATA ===")
+            for key, value in video['metadata_row'].items():
+                if pd.notna(value) and value:
+                    lines.append(f"{key}: {value}")
+        
+        text_widget.insert(1.0, "\n".join(lines))
         text_widget.config(state=tk.DISABLED)
 
 
@@ -307,4 +464,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
