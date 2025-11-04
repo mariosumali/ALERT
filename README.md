@@ -1,118 +1,246 @@
-# Multimedia Event Parsing
+# Multimedia Event Parsing Platform
 
-**Stanford CS224V – Multimedia Event Parsing**  
-Mario Sumali, Shane Mion | Mentor: Vardhan Agrawal
+A full-stack platform that lets users upload long audio/video files, automatically transcribes them, detects "moments of interest," and displays those moments in a searchable web UI.
 
-Automated pipeline for parsing long audio and video files to identify key moments of interest in law enforcement recordings for the Police Records Access Project.
+## Architecture
 
-## Quick Start
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Launch GUI video browser
-python download_videos.py
-
-# Or use the Python API
-python -c "from src.data_ingestion.sjpd_loader import SJPDLoader; \
-           loader = SJPDLoader(); \
-           print(loader.get_dataset_summary())"
-```
-
-## Dataset
-
-SJPD spreadsheets in `src/spreadsheets/`:
-- **transcripts.csv**: 21,000+ videos with Google Drive IDs and transcripts (primary source)
-- **videos w_ links.csv**: ~100 videos with detailed metadata (duration, descriptions, case info)
-- Browser cross-references both to show complete information
-
-## Key Features
-
-### Data Ingestion
-- **`sjpd_loader.py`**: Load SJPD spreadsheets, link videos with transcripts
-- **`transcript_processor.py`**: Detect events in transcripts (profanity, force mentions, commands, etc.)
-
-### Event Detection
-- **Audio**: Volume spikes, silence, gunshots, sirens, speech detection
-- **Video**: Occlusion, motion, lighting changes, body orientation shifts
-- **Text**: Force mentions, commands, profanity, temporal language
-- **Composite**: Multi-modal anomalies, context changes
+- **Frontend**: React + TypeScript + Vite + Tailwind CSS
+- **Backend**: FastAPI (Python)
+- **Transcription**: OpenAI Whisper
+- **Event Detection**: PyTorch (with placeholder model)
+- **Database**: PostgreSQL
+- **Task Queue**: Celery + Redis
+- **Storage**: Local filesystem (S3 optional)
 
 ## Project Structure
 
 ```
-src/
-├── data_ingestion/      # Spreadsheet loaders, transcript processing
-├── audio_processing/    # Audio feature extraction
-├── video_processing/    # Video feature extraction
-└── event_detection/     # Unified event detection pipeline
-
-data/
-├── raw/                 # Downloaded videos
-├── processed/           # Processed analyses
-└── annotations/         # Spreadsheets
+├── backend/
+│   ├── main.py               # FastAPI entrypoint
+│   ├── routes/
+│   │   ├── upload.py         # /upload endpoint
+│   │   ├── moments.py        # /moments endpoint
+│   ├── models/
+│   │   ├── database.py       # SQLAlchemy setup
+│   │   ├── schema.py         # Database models
+│   ├── services/
+│   │   ├── transcription.py  # Whisper wrapper
+│   │   ├── audio_features.py # Audio feature extraction
+│   │   ├── video_features.py # Video feature extraction
+│   │   ├── detect_events.py  # Event detection (dummy implementation)
+│   │   ├── train_event_detector.py # Model training script
+│   ├── utils/
+│   │   ├── s3_client.py      # S3 utilities
+│   │   ├── helpers.py
+│   ├── celery_worker.py      # Celery async tasks
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── UploadForm.tsx
+│   │   │   ├── VideoPlayer.tsx
+│   │   │   ├── MomentDropdown.tsx
+│   │   ├── pages/
+│   │   │   ├── index.tsx (App.tsx)
+│   │   ├── utils/
+│   │   │   ├── api.ts
+│   ├── package.json
+│   └── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
+
+## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose
+- OR Python 3.11+, Node.js 18+, PostgreSQL, Redis
+
+### Option 1: Docker Compose (Recommended)
+
+1. **Start all services:**
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Initialize database:**
+   ```bash
+   docker-compose exec backend python -c "from models.database import init_db; init_db()"
+   ```
+
+3. **Access the application:**
+   - Frontend: http://localhost:5001
+   - Backend API: http://localhost:8000
+   - API Docs: http://localhost:8000/docs
+
+### Option 2: Local Development
+
+#### Backend Setup
+
+1. **Install dependencies:**
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   ```
+
+2. **Set up PostgreSQL:**
+   ```bash
+   # Create database
+   createdb multimedia_events
+   ```
+
+3. **Initialize database:**
+   ```bash
+   python -c "from models.database import init_db; init_db()"
+   ```
+
+4. **Start Redis:**
+   ```bash
+   redis-server
+   ```
+
+5. **Start FastAPI server:**
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+6. **Start Celery worker (in another terminal):**
+   ```bash
+   celery -A celery_worker.celery_app worker --loglevel=info
+   ```
+
+#### Frontend Setup
+
+1. **Install dependencies:**
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+2. **Start development server:**
+   ```bash
+   npm run dev
+   ```
 
 ## Usage
 
-### GUI Video Browser
-```bash
-python download_videos.py
+1. **Upload a video/audio file** through the web UI
+2. The backend will:
+   - Save the file
+   - Launch a Celery task to transcribe and detect events
+   - Return 3 dummy moments (for testing)
+3. **View detected moments** in the dropdown
+4. **Filter by event type** (Gunshot, Silence, Motion, etc.)
+5. **Click a moment** to seek the video player to that timestamp
+
+## API Endpoints
+
+### POST /api/upload
+Upload a video/audio file.
+
+**Request:** Multipart form data with `file` field
+
+**Response:**
+```json
+{
+  "file_id": "uuid",
+  "message": "File uploaded successfully. Processing started.",
+  "status": "processing"
+}
 ```
-Browse videos, view metadata, access transcripts, and download videos interactively.
 
-### Python API
-```python
-from src.data_ingestion import SJPDLoader, TranscriptProcessor
+### GET /api/moments
+Get detected moments of interest.
 
-# Load dataset
-loader = SJPDLoader()
-summary = loader.get_dataset_summary()
-print(f"Total: {summary['total_duration_hours']:.1f} hours")
+**Query Parameters:**
+- `file_id` (optional): Filter by file ID
 
-# Process transcripts
-processor = TranscriptProcessor()
-results = processor.process_transcript(video_id, transcript)
-print(results['summary'])
+**Response:**
+```json
+{
+  "moments": [
+    {
+      "moment_id": "uuid",
+      "file_id": "uuid",
+      "start_time": 5.0,
+      "end_time": 8.0,
+      "event_types": ["Gunshot"],
+      "interest_score": 0.95,
+      "description": "Loud noise detected, possible gunshot"
+    }
+  ],
+  "count": 1
+}
 ```
 
-## Deliverables
+## Model Training
 
-1. Working prototype for parsing and labeling recordings
-2. Structured metadata output schema
-3. Research report with findings and next steps
+To train the event detector model:
 
-## Event Indicators
+1. **Prepare labeled CSV** with columns: `file_id`, `start_time`, `end_time`, `event_type`
 
-### Audio-Based
-Volume spikes/drops, gunshots, sirens, silence, microphone occlusion, overlapping voices, profanity, commands, emotional shifts, speaker count changes, clipping
+2. **Run training:**
+   ```bash
+   python backend/services/train_event_detector.py labeled_data.csv
+   ```
 
-### Video-Based  
-Camera occlusion, motion/shaking, lighting changes, body orientation, timestamp discontinuities, GPS jumps, frame corruption
+3. **Model will be saved** to `backend/models/event_detector.pt`
 
-### Derived
-Force mentions, named entities (officers/locations/times), temporal language, emotional language, uncertainty markers
+4. **Update `detect_events.py`** to load and use the trained model
 
-### Composite
-Co-occurring anomalies, low-activity stretches, cross-modal context changes
+## Environment Variables
+
+### Backend
+- `DATABASE_URL`: PostgreSQL connection string (default: `postgresql://postgres:postgres@localhost:5432/multimedia_events`)
+- `CELERY_BROKER_URL`: Redis broker URL (default: `redis://localhost:6379/0`)
+- `CELERY_RESULT_BACKEND`: Redis result backend (default: `redis://localhost:6379/0`)
+- `AWS_ACCESS_KEY_ID`: Optional, for S3 storage
+- `AWS_SECRET_ACCESS_KEY`: Optional, for S3 storage
+- `AWS_REGION`: Optional, for S3 storage
+
+### Frontend
+- `VITE_API_BASE_URL`: Backend API URL (default: `/api`)
+
+## Current Implementation Status
+
+✅ **Completed:**
+- Project structure and scaffolding
+- FastAPI backend with upload and moments endpoints
+- Database models (FileMetadata, MomentOfInterest)
+- React frontend with upload, video player, and moment dropdown
+- Celery worker setup
+- Docker Compose configuration
+- Dummy event detection (returns 3 fake moments)
+
+🔄 **To Be Implemented:**
+- Real event detection using trained model
+- Model loading in `detect_events.py`
+- Full feature extraction pipeline
+- Profanity detection in transcripts
+- S3 integration (optional)
+
+## Testing the First Feature
+
+1. Upload a short bodycam clip (mp4)
+2. Backend will process it and return 3 dummy moments
+3. UI will show the dropdown with detected events
+4. Selecting an event will filter and auto-seek the video
+
+## Development Notes
+
+- The current implementation uses **dummy moment detection** for testing
+- To enable real detection, update `services/detect_events.py` to:
+  1. Load the trained model
+  2. Extract features from uploaded files
+  3. Run inference
+  4. Return detected moments
+
+- File uploads are stored in `./uploads` directory
+- Database migrations are handled via SQLAlchemy's `create_all()`
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT
 
-## Acknowledgments
-
-- Stanford CS224V course staff
-- Police Records Access Project
-- Open source multimedia processing libraries
-
-## Contact
-
-For questions or collaboration opportunities, please contact:
-- Mario Sumali: [email]
-- Shane Mion: [email]
-
----
-
-*This project is part of Stanford CS224V - Multimedia Event Parsing course work.*
