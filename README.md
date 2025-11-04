@@ -14,9 +14,6 @@ pip install -r requirements.txt
 # Launch GUI video browser
 python download_videos.py
 
-# Run the body cam analysis pipeline on a local video upload
-python process_video.py path/to/video.mp4 --output-dir data/processed/analyses
-
 # Or use the Python API
 python -c "from src.data_ingestion.sjpd_loader import SJPDLoader; \
            loader = SJPDLoader(); \
@@ -35,11 +32,6 @@ SJPD spreadsheets in `src/spreadsheets/`:
 ### Data Ingestion
 - **`sjpd_loader.py`**: Load SJPD spreadsheets, link videos with transcripts
 - **`transcript_processor.py`**: Detect events in transcripts (profanity, force mentions, commands, etc.)
-
-### Upload & Analysis Pipeline
-- **`process_video.py`**: CLI entry point that mimics the GUI upload workflow.
-- **`src/platform/pipeline.py`**: Upload handler, transcript generation, occlusion detection, and event aggregation.
-- **`src/video_processing/occlusion_detector.py`**: Lightweight detector for camera occlusions using OpenCV.
 
 ### Event Detection
 - **Audio**: Volume spikes, silence, gunshots, sirens, speech detection
