@@ -1,7 +1,7 @@
 from celery import Celery
 from models.database import SessionLocal, init_db
 from models.schema import FileMetadata, MomentOfInterest
-from services.transcription import transcribe_file, transcribe_file_with_timestamps
+from services.transcription import transcribe_file_with_timestamps
 from services.detect_events import detect_moments
 import os
 
@@ -34,12 +34,24 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             print(f"File {file_id} not found in database")
             return
         
-        # Transcribe (disabled for now due to Whisper crashes - using dummy moments instead)
-        # TODO: Fix Whisper/transcription setup
-        print(f"Skipping transcription for file {file_id} (using dummy moments)...")
-        # transcript = transcribe_file(file_path)
-        # file_metadata.transcript = transcript
-        # db.commit()
+        transcript_text = ""
+        transcript_segments = []
+
+        try:
+            print(f"Transcribing file {file_id} prior to moment detection...")
+            transcript_text, transcript_segments = transcribe_file_with_timestamps(
+                file_path, use_mock=False
+            )
+            print(
+                f"Stored transcript for file {file_id} with {len(transcript_segments)} segments."
+            )
+        except Exception as exc:
+            print(f"Transcription failed for file {file_id}: {exc}")
+        finally:
+            # Persist whatever we have so the UI reflects the latest status
+            file_metadata.transcript = transcript_text
+            file_metadata.transcript_segments = transcript_segments
+            db.commit()
         
         # Detect moments
         print(f"Detecting moments for file {file_id}...")
@@ -79,35 +91,23 @@ def transcribe_task(file_id: str, file_path: str):
             print(f"File {file_id} not found in database")
             return
         
-        # Transcribe with timestamps (uses OpenAI API if OPENAI_API_KEY is set, otherwise uses mock)
         print(f"Transcribing file {file_id} with timestamps...")
+        transcript_text = ""
+        transcript_segments = []
+
         try:
-            transcript, segments = transcribe_file_with_timestamps(file_path, use_mock=False)
-            
-            if transcript and len(segments) > 0:
-                # Update file metadata with transcript and segments
-                file_metadata.transcript = transcript
-                file_metadata.transcript_segments = segments
-                db.commit()
-                
-                print(f"Transcription complete for file {file_id}. {len(segments)} segments created.")
-            else:
-                print(f"Transcription returned empty result for file {file_id}")
-                # Store empty result so we know it was attempted
-                file_metadata.transcript = ""
-                file_metadata.transcript_segments = []
-                db.commit()
-        except Exception as e:
-            print(f"Transcription failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            # Store failure indicator
-            try:
-                file_metadata.transcript = ""
-                file_metadata.transcript_segments = []
-                db.commit()
-            except:
-                pass
+            transcript_text, transcript_segments = transcribe_file_with_timestamps(
+                file_path, use_mock=False
+            )
+            print(
+                f"Transcription complete for file {file_id}. {len(transcript_segments)} segments created."
+            )
+        except Exception as exc:
+            print(f"Transcription failed for file {file_id}: {exc}")
+        finally:
+            file_metadata.transcript = transcript_text
+            file_metadata.transcript_segments = transcript_segments
+            db.commit()
         
     except Exception as e:
         print(f"Error in transcription task: {str(e)}")

@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from models.database import SessionLocal
 from models.schema import FileMetadata
-from services.transcription import transcribe_file_with_timestamps
 from celery_worker import transcribe_task
 import traceback
 
