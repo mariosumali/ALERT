@@ -16,6 +16,7 @@ class FileMetadata(Base):
     file_size = Column(Integer, nullable=True)  # Size in bytes
     original_filename = Column(String, nullable=True)
     transcript = Column(Text, nullable=True)  # Full transcript text
+    transcript_segments = Column(JSON, nullable=True)  # List of segments with timestamps: [{"start": 0.0, "end": 5.0, "text": "..."}]
 
 class MomentOfInterest(Base):
     __tablename__ = "moments_of_interest"

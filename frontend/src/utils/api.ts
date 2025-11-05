@@ -49,3 +49,30 @@ export async function getMoments(fileId?: string): Promise<MomentsResponse> {
   return response.data
 }
 
+export interface TranscriptionResponse {
+  file_id: string
+  transcript: string
+  segments: TranscriptionSegment[]
+  has_transcription: boolean
+}
+
+export interface TranscriptionSegment {
+  start: number
+  end: number
+  text: string
+}
+
+export async function transcribeFile(fileId: string): Promise<{ file_id: string; message: string; status: string }> {
+  const response = await axios.post<{ file_id: string; message: string; status: string }>(
+    `${API_BASE_URL}/transcribe?file_id=${fileId}`
+  )
+  return response.data
+}
+
+export async function getTranscription(fileId: string): Promise<TranscriptionResponse> {
+  const response = await axios.get<TranscriptionResponse>(
+    `${API_BASE_URL}/transcribe?file_id=${fileId}`
+  )
+  return response.data
+}
+

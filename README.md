@@ -6,7 +6,7 @@ A full-stack platform that lets users upload long audio/video files, automatical
 
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
 - **Backend**: FastAPI (Python)
-- **Transcription**: OpenAI Whisper
+- **Transcription**: OpenAI Whisper API (with mock fallback)
 - **Event Detection**: PyTorch (with placeholder model)
 - **Database**: PostgreSQL
 - **Task Queue**: Celery + Redis
@@ -60,17 +60,30 @@ A full-stack platform that lets users upload long audio/video files, automatical
 
 ### Option 1: Docker Compose (Recommended)
 
-1. **Start all services:**
+1. **Set up OpenAI API Key (for transcription):**
+   ```bash
+   # Get your API key from: https://platform.openai.com/api-keys
+   export OPENAI_API_KEY="your-api-key-here"
+   ```
+   
+   Alternatively, create a `.env` file in the project root:
+   ```bash
+   echo "OPENAI_API_KEY=your-api-key-here" > .env
+   ```
+   
+   **Note:** If you don't set the API key, the system will use mock transcription (fast but not real).
+
+2. **Start all services:**
    ```bash
    docker-compose up -d
    ```
 
-2. **Initialize database:**
+3. **Initialize database:**
    ```bash
    docker-compose exec backend python -c "from models.database import init_db; init_db()"
    ```
 
-3. **Access the application:**
+4. **Access the application:**
    - Frontend: http://localhost:5001
    - Backend API: http://localhost:8000
    - API Docs: http://localhost:8000/docs
