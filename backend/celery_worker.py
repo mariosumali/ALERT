@@ -55,7 +55,7 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
         
         # Detect moments
         print(f"Detecting moments for file {file_id}...")
-        moments = detect_moments(file_path, file_metadata.file_type)
+        moments = detect_moments(file_path, file_metadata.file_type, transcript_segments)
         
         # Save moments to database
         for moment_data in moments:

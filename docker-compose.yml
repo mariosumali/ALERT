@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15
@@ -37,6 +35,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/multimedia_events
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
@@ -55,6 +54,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/multimedia_events
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
