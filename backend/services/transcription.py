@@ -246,6 +246,165 @@ def _get_openai_client():
     return _openai_client
 
 
+def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_start: float = 0.0) -> List[Dict]:
+    """
+    Align transcript text with audio by detecting when speech occurs using RMS energy.
+    This is used when the API doesn't provide timestamps.
+    """
+    try:
+        import librosa
+        import numpy as np
+        
+        # Load audio and extract RMS energy
+        y, sr = librosa.load(audio_path, sr=None)
+        rms = librosa.feature.rms(y=y)[0]
+        hop_length = 512
+        rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
+        
+        # Detect speech regions (where energy is above threshold)
+        rms_mean = np.mean(rms)
+        speech_threshold = max(0.01, rms_mean * 0.3)
+        
+        # Find continuous speech regions
+        speech_regions = []
+        in_speech = False
+        speech_start = None
+        
+        for i, (time, energy) in enumerate(zip(rms_times, rms)):
+            if energy > speech_threshold:
+                if not in_speech:
+                    speech_start = time
+                    in_speech = True
+            else:
+                if in_speech:
+                    speech_regions.append((speech_start, time))
+                    in_speech = False
+        
+        if in_speech:
+            speech_regions.append((speech_start, rms_times[-1]))
+        
+        # If no speech detected, use full duration
+        if not speech_regions:
+            total_duration = len(y) / sr
+            speech_regions = [(0.0, total_duration)]
+        
+        # Split transcript into sentences
+        import re
+        sentence_endings = r'([.!?]+\s+|$)'
+        sentences = re.split(sentence_endings, transcript_text)
+        clean_sentences = []
+        for i in range(0, len(sentences) - 1, 2):
+            if i + 1 < len(sentences):
+                sentence = (sentences[i] + sentences[i + 1]).strip()
+                if sentence:
+                    clean_sentences.append(sentence)
+        if len(sentences) % 2 == 1 and sentences[-1].strip():
+            clean_sentences.append(sentences[-1].strip())
+        
+        if not clean_sentences:
+            clean_sentences = [transcript_text] if transcript_text else []
+        
+        # Distribute sentences across speech regions
+        segments = []
+        sentence_idx = 0
+        total_speech_duration = sum(end - start for start, end in speech_regions)
+        
+        if total_speech_duration > 0 and clean_sentences:
+            time_per_sentence = total_speech_duration / len(clean_sentences)
+            current_time = 0.0
+            
+            for sentence in clean_sentences:
+                # Find which speech region this sentence belongs to
+                target_time = current_time
+                segment_start = None
+                segment_end = None
+                
+                for region_start, region_end in speech_regions:
+                    region_duration = region_end - region_start
+                    if target_time < region_duration:
+                        segment_start = region_start + target_time
+                        segment_end = min(region_start + target_time + time_per_sentence, region_end)
+                        break
+                    target_time -= region_duration
+                
+                if segment_start is not None:
+                    segments.append({
+                        "start": round(chunk_start + segment_start, 2),
+                        "end": round(chunk_start + segment_end, 2),
+                        "text": sentence,
+                    })
+                current_time += time_per_sentence
+        else:
+            # Fallback: place all text at start
+            segments.append({
+                "start": round(chunk_start, 2),
+                "end": round(chunk_start + 1.0, 2),
+                "text": transcript_text,
+            })
+        
+        return segments
+    except Exception as e:
+        print(f"Warning: Could not align transcript with audio: {e}")
+        # Fallback: estimate based on word count
+        word_count = len(transcript_text.split())
+        estimated_duration = max(1.0, (word_count / 150.0) * 60.0)
+        return [{
+            "start": round(chunk_start, 2),
+            "end": round(chunk_start + estimated_duration, 2),
+            "text": transcript_text,
+        }]
+
+
+def _parse_srt(srt_content: str, chunk_start_offset: float = 0.0) -> Tuple[List[Dict], str]:
+    """
+    Parse SRT (SubRip) subtitle format to extract segments with timestamps.
+    Returns (segments, full_text) tuple.
+    """
+    segments = []
+    full_text_parts = []
+    
+    # Split SRT into blocks (each subtitle entry)
+    blocks = srt_content.strip().split('\n\n')
+    
+    for block in blocks:
+        lines = [line.strip() for line in block.split('\n') if line.strip()]
+        if len(lines) < 3:
+            continue
+        
+        # Line 0: sequence number (ignore)
+        # Line 1: timestamp range (e.g., "00:00:00,000 --> 00:00:05,000")
+        # Line 2+: text content
+        time_range = lines[1]
+        text = ' '.join(lines[2:])
+        
+        # Parse timestamp range
+        if ' --> ' not in time_range:
+            continue
+        
+        start_str, end_str = time_range.split(' --> ')
+        
+        # Convert SRT time format (HH:MM:SS,mmm) to seconds
+        def srt_time_to_seconds(srt_time: str) -> float:
+            """Convert SRT timestamp (00:00:00,000) to seconds."""
+            time_part, millis = srt_time.split(',')
+            hours, minutes, seconds = map(int, time_part.split(':'))
+            total_seconds = hours * 3600 + minutes * 60 + seconds + int(millis) / 1000.0
+            return total_seconds
+        
+        start_seconds = srt_time_to_seconds(start_str) + chunk_start_offset
+        end_seconds = srt_time_to_seconds(end_str) + chunk_start_offset
+        
+        segments.append({
+            "start": round(start_seconds, 2),
+            "end": round(end_seconds, 2),
+            "text": text.strip(),
+        })
+        full_text_parts.append(text.strip())
+    
+    full_text = " ".join(full_text_parts)
+    return segments, full_text
+
+
 def _split_audio_into_chunks(audio_path: str, chunk_duration: int = 60, overlap: int = 5) -> List[Tuple[str, float, float]]:
     """
     Split audio file into chunks for transcription.
@@ -312,7 +471,8 @@ def _split_audio_into_chunks(audio_path: str, chunk_duration: int = 60, overlap:
 
 def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
     client = _get_openai_client()
-    model_name = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
+    # Use whisper-1 which supports SRT format, or fallback to configured model
+    model_name = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1")
     max_attempts = int(os.getenv("OPENAI_TRANSCRIPTION_MAX_RETRIES", "3"))
     chunk_duration = int(os.getenv("OPENAI_CHUNK_DURATION", "60"))  # 60 seconds per chunk
     chunk_overlap = int(os.getenv("OPENAI_CHUNK_OVERLAP", "5"))  # 5 second overlap
@@ -361,30 +521,110 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
                 try:
                     print(f"Transcribing chunk {chunk_idx + 1}/{len(chunks)} ({chunk_start:.1f}s - {chunk_end:.1f}s)...")
                     with open(chunk_path, "rb") as audio_file:
-                        response = client.audio.transcriptions.create(
-                            model=model_name,
-                            file=audio_file,
-                            response_format="json",
-                            temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
-                        )
-
-                    if hasattr(response, "model_dump"):
-                        response_dict = response.model_dump()
-                    elif hasattr(response, "to_dict"):
-                        response_dict = response.to_dict()
-                    elif isinstance(response, dict):
-                        response_dict = response
+                        # Try SRT first (best format with timestamps), then verbose_json, then json
+                        use_verbose_json = False
+                        format_used = None
+                        
+                        try:
+                            # Try SRT format first - provides timestamps in subtitle format
+                            response = client.audio.transcriptions.create(
+                                model=model_name,
+                                file=audio_file,
+                                response_format="srt",
+                                temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                            )
+                            format_used = "srt"
+                        except Exception as e:
+                            # If SRT fails, try verbose_json
+                            if "srt" in str(e).lower() or "unsupported" in str(e).lower():
+                                print(f"SRT format not supported by {model_name}, trying verbose_json...")
+                                try:
+                                    audio_file.seek(0)  # Reset file pointer
+                                    response = client.audio.transcriptions.create(
+                                        model=model_name,
+                                        file=audio_file,
+                                        response_format="verbose_json",
+                                        temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                                    )
+                                    use_verbose_json = True
+                                    format_used = "verbose_json"
+                                except Exception as e2:
+                                    # If verbose_json also fails, fall back to json
+                                    if "verbose_json" in str(e2).lower() or "unsupported" in str(e2).lower():
+                                        print(f"verbose_json not supported, trying json format...")
+                                        audio_file.seek(0)  # Reset file pointer
+                                        response = client.audio.transcriptions.create(
+                                            model=model_name,
+                                            file=audio_file,
+                                            response_format="json",
+                                            temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                                        )
+                                        format_used = "json (aligned)"
+                                    else:
+                                        raise
+                            else:
+                                raise
+                    
+                    # Parse response based on format
+                    if format_used == "srt":
+                        # Parse SRT format to extract timestamps and text
+                        srt_content = response if isinstance(response, str) else str(response)
+                        segments, transcript_text = _parse_srt(srt_content, chunk_start)
+                    elif use_verbose_json:
+                        # Parse verbose_json format which includes segments with timestamps
+                        if hasattr(response, "model_dump"):
+                            response_dict = response.model_dump()
+                        elif hasattr(response, "to_dict"):
+                            response_dict = response.to_dict()
+                        elif isinstance(response, dict):
+                            response_dict = response
+                        else:
+                            response_dict = getattr(response, "__dict__", {})
+                        
+                        transcript_text = response_dict.get("text", "").strip()
+                        raw_segments = response_dict.get("segments", [])
+                        
+                        # Convert segments to our format with chunk offset
+                        segments = []
+                        for segment in raw_segments:
+                            if hasattr(segment, "model_dump"):
+                                segment = segment.model_dump()
+                            elif hasattr(segment, "to_dict"):
+                                segment = segment.to_dict()
+                            
+                            segment_start = float(segment.get("start", 0.0)) + chunk_start
+                            segment_end = float(segment.get("end", 0.0)) + chunk_start
+                            
+                            segments.append({
+                                "start": round(segment_start, 2),
+                                "end": round(segment_end, 2),
+                                "text": str(segment.get("text", "")).strip(),
+                            })
                     else:
-                        response_dict = getattr(response, "__dict__", {})
-                    transcript_text = response_dict.get("text", "").strip()
-                    raw_segments = response_dict.get("segments") or []
+                        # JSON format - no timestamps, need to use audio analysis
+                        if hasattr(response, "model_dump"):
+                            response_dict = response.model_dump()
+                        elif hasattr(response, "to_dict"):
+                            response_dict = response.to_dict()
+                        elif isinstance(response, dict):
+                            response_dict = response
+                        else:
+                            response_dict = getattr(response, "__dict__", {})
+                        
+                        transcript_text = response_dict.get("text", "").strip()
+                        # Use audio analysis to detect when speech occurs
+                        segments = _align_transcript_with_audio(chunk_path, transcript_text, chunk_start)
                     
                     # Log transcript length for debugging (only for first chunk to avoid spam)
                     if transcript_text and chunk_idx == 0:
                         print(f"Received transcript: {len(transcript_text)} characters, {len(transcript_text.split())} words")
+                        format_type = format_used or ("verbose_json" if use_verbose_json else "json (with audio alignment)")
+                        print(f"Parsed {len(segments)} segments from {format_type} format")
                         # Show first 200 chars as preview
                         preview = transcript_text[:200] + "..." if len(transcript_text) > 200 else transcript_text
                         print(f"Transcript preview: {preview}")
+                        if segments:
+                            print(f"First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s")
                     
                     # Save transcript to file for inspection (only first chunk to avoid duplicates)
                     if chunk_idx == 0:
@@ -407,94 +647,14 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
                                 f.write(f"Transcribed: {timestamp}\n")
                                 f.write(f"Characters: {len(transcript_text)}\n")
                                 f.write(f"Words: {len(transcript_text.split())}\n")
-                                f.write(f"Segments from API: {len(raw_segments)}\n")
+                                f.write(f"Segments: {len(segments)}\n")
+                                f.write(f"Format: {format_used or 'unknown'}\n")
                                 f.write("-" * 80 + "\n\n")
                                 f.write(transcript_text)
                             
                             print(f"Saved transcript to: {transcript_file}")
                         except Exception as e:
                             print(f"Warning: Could not save transcript to file: {e}")
-
-                    segments: List[Dict] = []
-                    
-                    # If segments are provided (verbose_json format), use them
-                    if raw_segments:
-                        for segment in raw_segments:
-                            # Segment objects may be dicts or dataclasses depending on SDK version
-                            if hasattr(segment, "model_dump"):
-                                segment = segment.model_dump()
-                            elif hasattr(segment, "to_dict"):
-                                segment = segment.to_dict()
-
-                            # Adjust timestamps based on chunk start time
-                            segment_start = float(segment.get("start", 0.0)) + chunk_start
-                            segment_end = float(segment.get("end", 0.0)) + chunk_start
-                            
-                            segments.append({
-                                "start": round(segment_start, 2),
-                                "end": round(segment_end, 2),
-                                "text": str(segment.get("text", "")).strip(),
-                            })
-                    else:
-                        # If no segments (json format), split transcript into sentence-based segments
-                        # Calculate chunk duration for timestamp estimation
-                        chunk_dur = chunk_end - chunk_start
-                        if chunk_dur <= 0:
-                            # Try to get actual duration of the chunk file
-                            try:
-                                import librosa
-                                chunk_dur = float(librosa.get_duration(path=chunk_path))
-                            except Exception:
-                                # Fallback: estimate ~150 words per minute
-                                word_count = len(transcript_text.split())
-                                chunk_dur = max(1.0, (word_count / 150.0) * 60.0)
-                        
-                        # Ensure chunk_dur is positive
-                        if chunk_dur <= 0:
-                            chunk_dur = 60.0  # Default to 60 seconds if we can't determine
-                        
-                        # Split transcript into sentences
-                        import re
-                        sentence_endings = r'([.!?]+\s+|$)'
-                        sentences = re.split(sentence_endings, transcript_text)
-                        
-                        # Filter and combine sentences
-                        clean_sentences = []
-                        for i in range(0, len(sentences) - 1, 2):
-                            if i + 1 < len(sentences):
-                                sentence = (sentences[i] + sentences[i + 1]).strip()
-                                if sentence:
-                                    clean_sentences.append(sentence)
-                        if len(sentences) % 2 == 1 and sentences[-1].strip():
-                            clean_sentences.append(sentences[-1].strip())
-                        
-                        # Fallback splitting methods
-                        if not clean_sentences:
-                            parts = [p.strip() for p in transcript_text.split(',') if p.strip()]
-                            if len(parts) > 1:
-                                clean_sentences = parts
-                            else:
-                                clean_sentences = [transcript_text] if transcript_text else []
-                        
-                        # Create segments with timestamps relative to chunk start
-                        if clean_sentences:
-                            time_per_segment = chunk_dur / len(clean_sentences) if clean_sentences else chunk_dur
-                            current_time = 0.0
-                            
-                            for sentence in clean_sentences:
-                                segment_end = min(current_time + time_per_segment, chunk_dur)
-                                segments.append({
-                                    "start": round(chunk_start + current_time, 2),
-                                    "end": round(chunk_start + segment_end, 2),
-                                    "text": sentence,
-                                })
-                                current_time = segment_end
-                        else:
-                            segments.append({
-                                "start": round(chunk_start, 2),
-                                "end": round(chunk_start + chunk_dur, 2),
-                                "text": transcript_text,
-                            })
 
                     # Add chunk results to combined results
                     all_segments.extend(segments)
