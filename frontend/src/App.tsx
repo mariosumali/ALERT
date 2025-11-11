@@ -3,6 +3,7 @@ import UploadForm from './components/UploadForm'
 import VideoPlayer from './components/VideoPlayer'
 import MomentDropdown from './components/MomentDropdown'
 import TranscriptionView from './components/TranscriptionView'
+import ChatBot from './components/ChatBot'
 import { transcribeFile } from './utils/api'
 import StatusBanner, { StatusBannerVariant } from './components/StatusBanner'
 import type { TranscriptionStatusPayload, TranscriptionStatusState } from './types/transcription'
@@ -210,9 +211,13 @@ function App() {
           </div>
 
           {/* Right Column: Video Player */}
-          <div className="rounded-lg bg-white p-6 shadow-md">
-            <h2 className="mb-4 text-2xl font-semibold">Video Player</h2>
-            <VideoPlayer videoUrl={videoUrl} moments={moments} />
+          <div className="space-y-6">
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <h2 className="mb-4 text-2xl font-semibold">Video Player</h2>
+              <VideoPlayer videoUrl={videoUrl} moments={moments} />
+            </div>
+
+            {fileId && <ChatBot fileId={fileId} />}
           </div>
         </div>
       </div>

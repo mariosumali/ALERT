@@ -76,3 +76,31 @@ export async function getTranscription(fileId: string): Promise<TranscriptionRes
   return response.data
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  message: ChatMessage
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
+}
+
+export async function chatWithTranscript(
+  fileId: string,
+  messages: ChatMessage[]
+): Promise<ChatResponse> {
+  const response = await axios.post<ChatResponse>(
+    `${API_BASE_URL}/chat`,
+    {
+      file_id: fileId,
+      messages: messages,
+    }
+  )
+  return response.data
+}
+
