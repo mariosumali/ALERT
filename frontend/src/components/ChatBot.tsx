@@ -20,6 +20,12 @@ export default function ChatBot({ fileId }: ChatBotProps) {
     scrollToBottom()
   }, [messages])
 
+  // Clear chat when fileId changes (new video uploaded)
+  useEffect(() => {
+    setMessages([])
+    setError(null)
+  }, [fileId])
+
   const handleSend = async () => {
     if (!input.trim() || !fileId || loading) return
 

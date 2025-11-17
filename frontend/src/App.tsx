@@ -4,7 +4,7 @@ import VideoPlayer from './components/VideoPlayer'
 import MomentDropdown from './components/MomentDropdown'
 import TranscriptionView from './components/TranscriptionView'
 import ChatBot from './components/ChatBot'
-import { transcribeFile } from './utils/api'
+import { transcribeFile, downloadTranscript } from './utils/api'
 import StatusBanner, { StatusBannerVariant } from './components/StatusBanner'
 import type { TranscriptionStatusPayload, TranscriptionStatusState } from './types/transcription'
 
@@ -29,6 +29,7 @@ function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [moments, setMoments] = useState<Moment[]>([])
   const [transcribing, setTranscribing] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [statusBanner, setStatusBanner] = useState<BannerState | null>(null)
   const momentsPollRef = useRef<number | null>(null)
   const lastTranscriptionState = useRef<TranscriptionStatusState | null>(null)
@@ -49,18 +50,8 @@ function App() {
       message: 'We are processing your media. Detected moments and transcripts will populate automatically.',
     })
 
-    // Poll for moments after upload (poll multiple times until moments appear)
-    let pollCount = 0
-    const maxPolls = 10
-    const pollInterval = window.setInterval(() => {
-      pollCount++
-      fetchMoments(newFileId)
-      if (pollCount >= maxPolls) {
-        clearInterval(pollInterval)
-        momentsPollRef.current = null
-      }
-    }, 2000)
-    momentsPollRef.current = pollInterval
+    // The useEffect hook will handle polling when fileId changes
+    // No need to set up polling here as it's handled in useEffect
   }
 
   const handleTranscribe = async () => {
@@ -93,11 +84,53 @@ function App() {
     }
   }
 
+  const handleDownloadTranscript = async () => {
+    if (!fileId) return
+
+    setDownloading(true)
+    try {
+      await downloadTranscript(fileId)
+      setStatusBanner({
+        variant: 'success',
+        title: 'Download started',
+        message: 'The comprehensive transcript file is being downloaded.',
+      })
+    } catch (error) {
+      console.error('Failed to download transcript:', error)
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+      setStatusBanner({
+        variant: 'error',
+        title: 'Unable to download transcript',
+        message: errorMsg || 'Transcript file may not be available yet. Please wait for processing to complete.',
+      })
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const fetchMoments = async (id: string) => {
     try {
       const response = await fetch(`/api/moments?file_id=${id}`)
+      if (!response.ok) {
+        console.error('Failed to fetch moments:', response.status, response.statusText)
+        return
+      }
       const data = await response.json()
-      setMoments(data.moments || [])
+      const moments = data.moments || []
+      console.log(`Fetched ${moments.length} moments for file ${id}`)
+      if (moments.length > 0) {
+        // Log event types for debugging
+        const eventTypes = Array.from(new Set(moments.flatMap((m: Moment) => m.event_types || [])))
+        console.log('Event types found:', eventTypes)
+      }
+      setMoments(moments)
+      
+      // If we got moments, stop polling
+      if (moments.length > 0 && momentsPollRef.current) {
+        clearInterval(momentsPollRef.current)
+        momentsPollRef.current = null
+        console.log('Stopped polling - moments found')
+      }
     } catch (error) {
       console.error('Failed to fetch moments:', error)
     }
@@ -145,13 +178,44 @@ function App() {
     }
   }
 
+  // Fetch moments when fileId changes
   useEffect(() => {
+    if (!fileId) {
+      setMoments([])
+      return
+    }
+    
+    // Clear any existing polling
+    if (momentsPollRef.current) {
+      clearInterval(momentsPollRef.current)
+      momentsPollRef.current = null
+    }
+    
+    // Initial fetch
+    fetchMoments(fileId)
+    
+    // Set up continuous polling until moments are found
+    let pollCount = 0
+    const maxPolls = 60 // 2 minutes
+    const pollInterval = window.setInterval(async () => {
+      pollCount++
+      await fetchMoments(fileId)
+      if (pollCount >= maxPolls) {
+        clearInterval(pollInterval)
+        momentsPollRef.current = null
+        console.log('Stopped polling for moments after maximum attempts')
+      }
+    }, 2000)
+    momentsPollRef.current = pollInterval
+    
     return () => {
       if (momentsPollRef.current) {
         clearInterval(momentsPollRef.current)
+        momentsPollRef.current = null
       }
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileId])
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -184,13 +248,22 @@ function App() {
                 <div className="rounded-lg bg-white p-6 shadow-md">
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="text-2xl font-semibold">Transcription</h2>
-                    <button
-                      onClick={handleTranscribe}
-                      disabled={transcribing}
-                      className="rounded-lg bg-green-600 px-4 py-2 text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                    >
-                      {transcribing ? 'Transcribing...' : 'Transcribe'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleDownloadTranscript}
+                        disabled={downloading || !fileId}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                      >
+                        {downloading ? 'Downloading...' : 'Download Transcript'}
+                      </button>
+                      <button
+                        onClick={handleTranscribe}
+                        disabled={transcribing}
+                        className="rounded-lg bg-green-600 px-4 py-2 text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                      >
+                        {transcribing ? 'Transcribing...' : 'Transcribe'}
+                      </button>
+                    </div>
                   </div>
                   <TranscriptionView fileId={fileId} onStatusChange={handleTranscriptionStatusChange} />
                 </div>
@@ -203,7 +276,12 @@ function App() {
                       const event = new CustomEvent('seekTo', { detail: moment.start_time })
                       window.dispatchEvent(event)
                     }}
-                    onRefresh={() => fetchMoments(fileId)}
+                    onRefresh={async () => {
+                      if (fileId) {
+                        await fetchMoments(fileId)
+                      }
+                    }}
+                    fileId={fileId}
                   />
                 </div>
               </>

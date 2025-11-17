@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from models.database import SessionLocal
 from models.schema import FileMetadata
 from celery_worker import transcribe_task
 import traceback
+import os
+import glob
 
 router = APIRouter()
 
@@ -63,4 +65,44 @@ async def get_transcription(file_id: str = Query(..., description="File ID to ge
         raise HTTPException(status_code=500, detail=f"Failed to get transcription: {str(e)}")
     finally:
         db.close()
+
+@router.get("/transcribe/download")
+async def download_transcript(file_id: str = Query(..., description="File ID to download transcript for")):
+    """
+    Download the comprehensive transcript file with timestamps and anomalies.
+    """
+    try:
+        # Find the transcript file for this file_id
+        # Transcripts are saved in backend/transcripts/ directory
+        # __file__ is backend/routes/transcribe.py, so go up one level to backend/
+        backend_dir = os.path.dirname(os.path.dirname(__file__))
+        transcripts_dir = os.path.join(backend_dir, "transcripts")
+        
+        if not os.path.exists(transcripts_dir):
+            raise HTTPException(status_code=404, detail="Transcript file not found. File may not have been processed yet.")
+        
+        # Find the most recent transcript file for this file_id
+        pattern = os.path.join(transcripts_dir, f"{file_id}_*.txt")
+        transcript_files = glob.glob(pattern)
+        
+        if not transcript_files:
+            raise HTTPException(status_code=404, detail="Transcript file not found. File may not have been processed yet.")
+        
+        # Get the most recent file (by modification time)
+        transcript_file = max(transcript_files, key=os.path.getmtime)
+        
+        # Get filename for download
+        filename = os.path.basename(transcript_file)
+        
+        return FileResponse(
+            transcript_file,
+            media_type="text/plain",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download transcript: {str(e)}")
 

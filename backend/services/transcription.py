@@ -246,10 +246,16 @@ def _get_openai_client():
     return _openai_client
 
 
-def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_start: float = 0.0) -> List[Dict]:
+def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_start: float = 0.0, max_duration: float = 0.0) -> List[Dict]:
     """
     Align transcript text with audio by detecting when speech occurs using RMS energy.
     This is used when the API doesn't provide timestamps.
+    
+    Args:
+        audio_path: Path to audio file
+        transcript_text: Text to align
+        chunk_start: Start time offset for this chunk
+        max_duration: Maximum duration to cap segments at (0.0 = no cap)
     """
     try:
         import librosa
@@ -257,9 +263,13 @@ def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_st
         
         # Load audio and extract RMS energy
         y, sr = librosa.load(audio_path, sr=None)
+        audio_duration = len(y) / sr
         rms = librosa.feature.rms(y=y)[0]
         hop_length = 512
         rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
+        
+        # Use max_duration if provided, otherwise use audio duration
+        effective_duration = max_duration if max_duration > 0 else audio_duration
         
         # Detect speech regions (where energy is above threshold)
         rms_mean = np.mean(rms)
@@ -271,6 +281,11 @@ def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_st
         speech_start = None
         
         for i, (time, energy) in enumerate(zip(rms_times, rms)):
+            # Cap to effective duration
+            if time >= effective_duration:
+                if in_speech:
+                    speech_regions.append((speech_start, effective_duration))
+                break
             if energy > speech_threshold:
                 if not in_speech:
                     speech_start = time
@@ -281,12 +296,11 @@ def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_st
                     in_speech = False
         
         if in_speech:
-            speech_regions.append((speech_start, rms_times[-1]))
+            speech_regions.append((speech_start, min(rms_times[-1], effective_duration)))
         
-        # If no speech detected, use full duration
+        # If no speech detected, use full duration (capped)
         if not speech_regions:
-            total_duration = len(y) / sr
-            speech_regions = [(0.0, total_duration)]
+            speech_regions = [(0.0, effective_duration)]
         
         # Split transcript into sentences
         import re
@@ -307,7 +321,7 @@ def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_st
         # Distribute sentences across speech regions
         segments = []
         sentence_idx = 0
-        total_speech_duration = sum(end - start for start, end in speech_regions)
+        total_speech_duration = sum(min(end, effective_duration) - start for start, end in speech_regions)
         
         if total_speech_duration > 0 and clean_sentences:
             time_per_sentence = total_speech_duration / len(clean_sentences)
@@ -320,25 +334,31 @@ def _align_transcript_with_audio(audio_path: str, transcript_text: str, chunk_st
                 segment_end = None
                 
                 for region_start, region_end in speech_regions:
-                    region_duration = region_end - region_start
+                    region_duration = min(region_end, effective_duration) - region_start
                     if target_time < region_duration:
                         segment_start = region_start + target_time
-                        segment_end = min(region_start + target_time + time_per_sentence, region_end)
+                        segment_end = min(region_start + target_time + time_per_sentence, min(region_end, effective_duration))
                         break
                     target_time -= region_duration
                 
                 if segment_start is not None:
-                    segments.append({
-                        "start": round(chunk_start + segment_start, 2),
-                        "end": round(chunk_start + segment_end, 2),
-                        "text": sentence,
-                    })
+                    # Cap to effective duration
+                    segment_start = min(segment_start, effective_duration)
+                    segment_end = min(segment_end, effective_duration)
+                    
+                    # Only add if valid
+                    if segment_start < segment_end:
+                        segments.append({
+                            "start": round(chunk_start + segment_start, 2),
+                            "end": round(chunk_start + segment_end, 2),
+                            "text": sentence,
+                        })
                 current_time += time_per_sentence
         else:
-            # Fallback: place all text at start
+            # Fallback: place all text at start (capped)
             segments.append({
                 "start": round(chunk_start, 2),
-                "end": round(chunk_start + 1.0, 2),
+                "end": round(chunk_start + min(1.0, effective_duration), 2),
                 "text": transcript_text,
             })
         
@@ -394,11 +414,15 @@ def _parse_srt(srt_content: str, chunk_start_offset: float = 0.0) -> Tuple[List[
         start_seconds = srt_time_to_seconds(start_str) + chunk_start_offset
         end_seconds = srt_time_to_seconds(end_str) + chunk_start_offset
         
-        segments.append({
-            "start": round(start_seconds, 2),
-            "end": round(end_seconds, 2),
-            "text": text.strip(),
-        })
+        # Ensure we have valid timestamps
+        if start_seconds >= 0 and end_seconds > start_seconds:
+            segments.append({
+                "start": round(start_seconds, 2),
+                "end": round(end_seconds, 2),
+                "text": text.strip(),
+            })
+        else:
+            print(f"  Warning: Invalid SRT timestamps: start={start_seconds}, end={end_seconds}")
         full_text_parts.append(text.strip())
     
     full_text = " ".join(full_text_parts)
@@ -513,6 +537,10 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
         full_text_parts = []
         
         print(f"Transcribing {len(chunks)} chunk(s) using OpenAI API (model={model_name})...")
+        print(f"Total audio duration: {actual_duration:.1f}s, chunk duration: {chunk_duration}s")
+        
+        successful_chunks = 0
+        failed_chunks = 0
         
         for chunk_idx, (chunk_path, chunk_start, chunk_end) in enumerate(chunks):
             chunk_files.append(chunk_path)  # Track for cleanup
@@ -595,11 +623,15 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
                             segment_start = float(segment.get("start", 0.0)) + chunk_start
                             segment_end = float(segment.get("end", 0.0)) + chunk_start
                             
-                            segments.append({
-                                "start": round(segment_start, 2),
-                                "end": round(segment_end, 2),
-                                "text": str(segment.get("text", "")).strip(),
-                            })
+                            # Ensure we have valid timestamps
+                            if segment_start >= 0 and segment_end > segment_start:
+                                segments.append({
+                                    "start": round(segment_start, 2),
+                                    "end": round(segment_end, 2),
+                                    "text": str(segment.get("text", "")).strip(),
+                                })
+                            else:
+                                print(f"  Warning: Invalid timestamps in segment: start={segment_start}, end={segment_end}")
                     else:
                         # JSON format - no timestamps, need to use audio analysis
                         if hasattr(response, "model_dump"):
@@ -613,59 +645,30 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
                         
                         transcript_text = response_dict.get("text", "").strip()
                         # Use audio analysis to detect when speech occurs
-                        segments = _align_transcript_with_audio(chunk_path, transcript_text, chunk_start)
+                        # Pass actual_duration to cap segments
+                        segments = _align_transcript_with_audio(chunk_path, transcript_text, chunk_start, actual_duration if actual_duration > 0 else 0.0)
                     
-                    # Log transcript length for debugging (only for first chunk to avoid spam)
-                    if transcript_text and chunk_idx == 0:
-                        print(f"Received transcript: {len(transcript_text)} characters, {len(transcript_text.split())} words")
+                    # Log transcript length for debugging
+                    if transcript_text:
+                        print(f"Chunk {chunk_idx + 1}: Received {len(transcript_text)} characters, {len(transcript_text.split())} words")
                         format_type = format_used or ("verbose_json" if use_verbose_json else "json (with audio alignment)")
-                        print(f"Parsed {len(segments)} segments from {format_type} format")
-                        # Show first 200 chars as preview
-                        preview = transcript_text[:200] + "..." if len(transcript_text) > 200 else transcript_text
-                        print(f"Transcript preview: {preview}")
+                        print(f"Chunk {chunk_idx + 1}: Parsed {len(segments)} segments from {format_type} format")
                         if segments:
-                            print(f"First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s")
-                    
-                    # Save transcript to file for inspection (only first chunk to avoid duplicates)
-                    if chunk_idx == 0:
-                        try:
-                            # Create transcripts directory in the same location as uploads
-                            # file_path is typically ./uploads/{file_id}.mp4
-                            uploads_dir = os.path.dirname(os.path.abspath(file_path))
-                            transcripts_dir = os.path.join(uploads_dir, "..", "transcripts")
-                            transcripts_dir = os.path.abspath(transcripts_dir)
-                            os.makedirs(transcripts_dir, exist_ok=True)
-                            
-                            # Save to file with timestamp
-                            import datetime
-                            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                            file_id = os.path.splitext(os.path.basename(file_path))[0]
-                            transcript_file = os.path.join(transcripts_dir, f"{file_id}_{timestamp}.txt")
-                            
-                            with open(transcript_file, "w", encoding="utf-8") as f:
-                                f.write(f"File: {file_path}\n")
-                                f.write(f"Transcribed: {timestamp}\n")
-                                f.write(f"Characters: {len(transcript_text)}\n")
-                                f.write(f"Words: {len(transcript_text.split())}\n")
-                                f.write(f"Segments: {len(segments)}\n")
-                                f.write(f"Format: {format_used or 'unknown'}\n")
-                                f.write("-" * 80 + "\n\n")
-                                f.write(transcript_text)
-                            
-                            print(f"Saved transcript to: {transcript_file}")
-                        except Exception as e:
-                            print(f"Warning: Could not save transcript to file: {e}")
+                            print(f"Chunk {chunk_idx + 1}: First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s")
+                            if len(segments) > 1:
+                                print(f"Chunk {chunk_idx + 1}: Last segment: {segments[-1]['start']:.1f}s - {segments[-1]['end']:.1f}s")
 
                     # Add chunk results to combined results
                     all_segments.extend(segments)
                     if transcript_text:
                         full_text_parts.append(transcript_text)
                     
-                    print(f"Chunk {chunk_idx + 1} complete: {len(segments)} segments")
+                    print(f"✓ Chunk {chunk_idx + 1}/{len(chunks)} complete: {len(segments)} segments")
                     if segments:
                         print(f"  First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s: {segments[0]['text'][:50]}...")
                         if len(segments) > 1:
                             print(f"  Last segment: {segments[-1]['start']:.1f}s - {segments[-1]['end']:.1f}s: {segments[-1]['text'][:50]}...")
+                    successful_chunks += 1
                     break  # Success, move to next chunk
                     
                 except Exception as exc:
@@ -679,14 +682,35 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
                             print(f"Chunk {chunk_idx + 1} rate limit (attempt {attempt}). Retrying in {delay}s...")
                             time.sleep(delay)
                             continue
-                        print(f"Warning: Chunk {chunk_idx + 1} failed after retries: {error_message}")
+                        print(f"⚠ Chunk {chunk_idx + 1} failed after {max_attempts} retries: {error_message}")
+                        failed_chunks += 1
                         break  # Skip this chunk and continue with others
                     
-                    print(f"Warning: Chunk {chunk_idx + 1} failed: {error_message}")
+                    print(f"⚠ Chunk {chunk_idx + 1} failed: {error_message}")
+                    failed_chunks += 1
                     break  # Skip this chunk and continue with others
         
         # Combine all results
         transcript_text = " ".join(full_text_parts)
+        
+        print(f"Transcription summary: {successful_chunks}/{len(chunks)} chunks successful, {failed_chunks} failed")
+        print(f"Total segments collected: {len(all_segments)}, Total text length: {len(transcript_text)} characters")
+        
+        if not all_segments:
+            raise TranscriptionError("openai", "no_segments", f"Failed to transcribe any chunks. {failed_chunks} chunks failed.")
+        
+        # Validate all segments have timestamps before sorting
+        valid_segments = []
+        for seg in all_segments:
+            if "start" in seg and "end" in seg and seg.get("start", -1) >= 0 and seg.get("end", 0) > seg.get("start", -1):
+                valid_segments.append(seg)
+            else:
+                print(f"  Warning: Dropping segment without valid timestamps: {seg}")
+        
+        all_segments = valid_segments
+        
+        if not all_segments:
+            raise TranscriptionError("openai", "no_valid_segments", "No segments with valid timestamps were extracted.")
         
         # Sort segments by start time
         all_segments.sort(key=lambda x: x["start"])
@@ -717,25 +741,88 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
         
         # Additional pass: remove segments that are too close together with identical text
         final_segments = []
+        seen_texts = {}  # Track text content and when it was last seen
+        
         for i, segment in enumerate(deduplicated_segments):
             is_duplicate = False
-            for prev_seg in final_segments[-5:]:  # Check last 5 segments
-                time_diff = abs(prev_seg["start"] - segment["start"])
-                if time_diff < 1.0 and prev_seg["text"] == segment["text"]:
+            text = segment["text"].strip()
+            start_time = segment["start"]
+            
+            # Check against all previous segments with same text (not just last 5)
+            if text in seen_texts:
+                last_seen_time = seen_texts[text]
+                time_diff = abs(start_time - last_seen_time)
+                # If same text appears within 5 seconds, it's likely a duplicate
+                if time_diff < 5.0:
                     is_duplicate = True
-                    break
+            else:
+                # Also check last 10 segments for similar text (catches variations)
+                for prev_seg in final_segments[-10:]:
+                    time_diff = abs(prev_seg["start"] - start_time)
+                    prev_text = prev_seg["text"].strip()
+                    # Check if texts are very similar (handles minor variations)
+                    if time_diff < 2.0 and (text == prev_text or 
+                                          (len(text) > 10 and len(prev_text) > 10 and 
+                                           text[:min(50, len(text))] == prev_text[:min(50, len(prev_text))])):
+                        is_duplicate = True
+                        break
+            
             if not is_duplicate:
                 final_segments.append(segment)
+                seen_texts[text] = start_time
         
         deduplicated_segments = final_segments
+        
+        # Cap all segments to not exceed actual video duration
+        if actual_duration > 0:
+            capped_segments = []
+            for segment in deduplicated_segments:
+                # Cap start and end times to actual duration
+                capped_start = min(segment["start"], actual_duration)
+                capped_end = min(segment["end"], actual_duration)
+                
+                # Only keep segments that are valid (start < end and within duration)
+                if capped_start < capped_end and capped_start < actual_duration:
+                    segment["start"] = round(capped_start, 2)
+                    segment["end"] = round(capped_end, 2)
+                    capped_segments.append(segment)
+                else:
+                    # Skip segments that are completely outside duration
+                    print(f"  Warning: Dropping segment outside duration: {segment['start']:.1f}s - {segment['end']:.1f}s (duration: {actual_duration:.1f}s)")
+            
+            deduplicated_segments = capped_segments
+            print(f"  Capped segments to video duration: {actual_duration:.1f}s")
+        
+        # Final pass: remove any remaining duplicates of the last segment
+        if len(deduplicated_segments) > 1:
+            last_segment = deduplicated_segments[-1]
+            last_text = last_segment["text"].strip()
+            # Remove any segments with identical text that appear near the end
+            final_clean_segments = []
+            for i, segment in enumerate(deduplicated_segments):
+                # If this is one of the last 3 segments and has same text as the actual last segment, skip it
+                if i >= len(deduplicated_segments) - 3 and segment["text"].strip() == last_text:
+                    if i == len(deduplicated_segments) - 1:
+                        # Keep the actual last one
+                        final_clean_segments.append(segment)
+                    # Otherwise skip duplicates
+                else:
+                    final_clean_segments.append(segment)
+            
+            deduplicated_segments = final_clean_segments
         
         # If we got no segments at all, raise error
         if not deduplicated_segments:
             raise TranscriptionError("openai", "unknown", "Failed to transcribe any chunks")
         
-        print(f"OpenAI transcription complete: {len(deduplicated_segments)} total segments from {len(chunks)} chunk(s) (deduplicated from {len(all_segments)})")
+        print(f"✓ OpenAI transcription complete: {len(deduplicated_segments)} total segments from {len(chunks)} chunk(s) (deduplicated from {len(all_segments)})")
         if deduplicated_segments:
             print(f"  Time range: {deduplicated_segments[0]['start']:.1f}s - {deduplicated_segments[-1]['end']:.1f}s")
+            if actual_duration > 0:
+                coverage = (deduplicated_segments[-1]['end'] / actual_duration) * 100 if actual_duration > 0 else 0
+                print(f"  Video duration: {actual_duration:.1f}s, Coverage: {coverage:.1f}%")
+                if coverage < 50:
+                    print(f"  ⚠ Warning: Low coverage ({coverage:.1f}%) - transcription may be incomplete")
             # Check for duplicate timestamps
             timestamp_counts = {}
             for seg in deduplicated_segments:
@@ -744,6 +831,12 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
             duplicates = {ts: count for ts, count in timestamp_counts.items() if count > 1}
             if duplicates:
                 print(f"  Warning: Found duplicate timestamps: {duplicates}")
+        
+        # Final validation - ensure we have segments covering the full duration
+        if actual_duration > 0 and deduplicated_segments:
+            last_segment_end = deduplicated_segments[-1]['end']
+            if last_segment_end < actual_duration * 0.8:  # Less than 80% coverage
+                print(f"  ⚠ Warning: Transcription may be incomplete. Last segment ends at {last_segment_end:.1f}s but video is {actual_duration:.1f}s")
         
         return transcript_text, deduplicated_segments
     finally:

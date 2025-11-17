@@ -76,6 +76,24 @@ export async function getTranscription(fileId: string): Promise<TranscriptionRes
   return response.data
 }
 
+export async function downloadTranscript(fileId: string): Promise<void> {
+  const url = `${API_BASE_URL}/transcribe/download?file_id=${fileId}`
+  const response = await axios.get(url, {
+    responseType: 'blob',
+  })
+  
+  // Create a blob URL and trigger download
+  const blob = new Blob([response.data], { type: 'text/plain' })
+  const blobUrl = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = `transcript_${fileId}.txt`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(blobUrl)
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
