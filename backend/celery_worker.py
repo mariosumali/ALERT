@@ -113,6 +113,10 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             print(f"File {file_id} not found in database")
             return
         
+        # Update status to processing_transcription
+        file_metadata.status = "processing_transcription"
+        db.commit()
+        
         transcript_text = ""
         transcript_segments = []
 
@@ -131,11 +135,35 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
                     print(f"  Last segment: [{transcript_segments[-1].get('start', 0):.1f}s - {transcript_segments[-1].get('end', 0):.1f}s] {transcript_segments[-1].get('text', '')[:50]}...")
         except Exception as exc:
             print(f"Transcription failed for file {file_id}: {exc}")
+            file_metadata.status = "failed"
+            db.commit()
+            raise exc
         finally:
             # Persist whatever we have so the UI reflects the latest status
             file_metadata.transcript = transcript_text
             file_metadata.transcript_segments = transcript_segments
             db.commit()
+        
+        
+        # Perform OCR extraction if it's a video file
+        if file_metadata.file_type == "video":
+            from services.ocr_extraction import extract_metadata_from_video
+            print(f"[OCR] Extracting metadata from video frames for {file_id}...")
+            try:
+                ocr_metadata = extract_metadata_from_video(file_path)
+                if ocr_metadata and ocr_metadata.get("raw_text"):
+                    file_metadata.ocr_metadata = ocr_metadata
+                    db.commit()
+                    print(f"[OCR] ✓ Extracted metadata for file {file_id}:")
+                    for key, value in ocr_metadata.items():
+                        if value and key != "raw_text":
+                            print(f"[OCR]   {key}: {value}")
+                else:
+                    print(f"[OCR] No metadata found in video frames for file {file_id}")
+            except Exception as e:
+                print(f"[OCR] ⚠ Error during OCR extraction for file {file_id}: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Extract and save duration
         print(f"[METADATA] Extracting duration for file {file_id}...")
@@ -157,6 +185,10 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             import traceback
             traceback.print_exc()
         
+        # Update status to processing_audio
+        file_metadata.status = "processing_audio"
+        db.commit()
+
         # Extract and analyze raw audio for anomalies
         audio_anomalies = []
         extracted_audio_path = None
@@ -182,6 +214,36 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             print(f"[AUDIO ANOMALY DETECTION] ⚠ Error in audio anomaly detection: {e}")
             import traceback
             traceback.print_exc()
+        
+        # Store audio anomalies as MomentOfInterest records
+        if audio_anomalies:
+            from models.schema import MomentOfInterest
+            print(f"[MOMENTS] Storing {len(audio_anomalies)} audio anomalies as moments...")
+            
+            stored_count = 0
+            for anomaly in audio_anomalies:
+                try:
+                    # Only store high-confidence anomalies (≥0.8)
+                    if anomaly.get('confidence', 0.0) >= 0.8:
+                        moment = MomentOfInterest(
+                            file_id=file_id,
+                            start_time=anomaly['start_time'],
+                            end_time=anomaly['end_time'],
+                            event_types=[anomaly['category']],  # e.g., ["LoudSound", "Distortion"]
+                            interest_score=anomaly['confidence'],
+                            description=anomaly['description']
+                        )
+                        db.add(moment)
+                        stored_count += 1
+                        print(f"[MOMENTS]   - {anomaly['category']} at {anomaly['start_time']:.1f}s-{anomaly['end_time']:.1f}s (confidence: {anomaly['confidence']:.2f})")
+                except Exception as e:
+                    print(f"[MOMENTS] ⚠ Failed to store moment: {e}")
+            
+            if stored_count > 0:
+                db.commit()
+                print(f"[MOMENTS] ✓ Stored {stored_count} moments in database")
+            else:
+                print(f"[MOMENTS] No high-confidence anomalies to store")
         
         # Save comprehensive transcript file with timestamps and anomalies
         try:
@@ -215,10 +277,23 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             except Exception as e:
                 print(f"[AUDIO ANOMALY DETECTION] ⚠ Could not delete temp directory: {e}")
         
+        # Update status to completed
+        file_metadata.status = "completed"
+        db.commit()
+
     except Exception as e:
         print(f"Error processing file {file_id}: {str(e)}")
         import traceback
         traceback.print_exc()
+        # Try to update status to failed
+        try:
+            if 'db' in locals():
+                file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+                if file_metadata:
+                    file_metadata.status = "failed"
+                    db.commit()
+        except:
+            pass
     finally:
         db.close()
 

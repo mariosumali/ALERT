@@ -116,8 +116,35 @@ async def chat_with_transcript(request: ChatRequest):
                 text = seg.get("text", "")
                 transcript_context += f"[{start:.1f}s - {end:.1f}s] {text}\n"
         
+        # Get detected moments (events) from database
+        from models.schema import MomentOfInterest
+        moments = db.query(MomentOfInterest).filter(MomentOfInterest.file_id == request.file_id).all()
         
-        # Build messages with system context
+        moments_context = ""
+        if moments:
+            moments_context = f"\n\nDetected Events ({len(moments)} total):\n"
+            moments_context += "The following events were automatically detected in the video:\n\n"
+            
+            for moment in moments:
+                event_types = moment.event_types if moment.event_types else ["Unknown"]
+                event_type_str = ", ".join(event_types)
+                
+                # Format time as MM:SS
+                start_mins = int(moment.start_time // 60)
+                start_secs = int(moment.start_time % 60)
+                end_mins = int(moment.end_time // 60)
+                end_secs = int(moment.end_time % 60)
+                time_str = f"{start_mins}:{start_secs:02d} - {end_mins}:{end_secs:02d}"
+                
+                confidence_pct = int(moment.interest_score * 100)
+                
+                moments_context += f"- [{event_type_str}] at {time_str} ({moment.start_time:.1f}s-{moment.end_time:.1f}s)"
+                moments_context += f" [Confidence: {confidence_pct}%]\n"
+                if moment.description:
+                    moments_context += f"  Description: {moment.description}\n"
+                moments_context += "\n"
+        
+        
         messages = [
             {
                 "role": "system",
@@ -125,14 +152,16 @@ async def chat_with_transcript(request: ChatRequest):
 You have access to:
 1. The full transcript of a video, including timestamps for each segment
 2. Video metadata
+3. Automatically detected events (such as loud sounds, silences, and audio anomalies)
 
 When answering questions:
 - Reference specific timestamps when relevant (format: MM:SS or seconds)
+- When asked about events or moments, reference the detected events provided
 - Be concise and helpful
-- If asked about something not in the transcript, say so clearly
+- If asked about something not in the transcript or events, say so clearly
 
 {metadata_context}
-{transcript_context}"""
+{transcript_context}{moments_context}"""
             }
         ]
         

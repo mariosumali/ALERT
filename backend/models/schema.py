@@ -17,6 +17,8 @@ class FileMetadata(Base):
     original_filename = Column(String, nullable=True)
     transcript = Column(Text, nullable=True)  # Full transcript text
     transcript_segments = Column(JSON, nullable=True)  # List of segments with timestamps: [{"start": 0.0, "end": 5.0, "text": "..."}]
+    status = Column(String, default="pending")  # pending, processing_transcription, processing_audio, completed, failed
+    ocr_metadata = Column(JSON, nullable=True)  # OCR extracted metadata: {"raw_text": "...", "timestamp": "...", "device_id": "...", ...}
 
 class MomentOfInterest(Base):
     __tablename__ = "moments_of_interest"

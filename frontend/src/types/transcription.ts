@@ -1,4 +1,4 @@
-export type TranscriptionStatusState = 'idle' | 'processing' | 'ready' | 'error' | 'empty'
+export type TranscriptionStatusState = 'idle' | 'processing' | 'processing_transcription' | 'processing_audio' | 'ready' | 'error' | 'empty'
 
 export interface TranscriptionStatusPayload {
   state: TranscriptionStatusState

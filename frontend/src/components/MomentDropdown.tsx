@@ -57,7 +57,7 @@ export default function MomentDropdown({
       })
     )
   ).sort()
-  
+
   // Count loud sound moments
   const loudSoundMoments = moments.filter((m) => {
     const types = m.event_types
@@ -75,7 +75,7 @@ export default function MomentDropdown({
     }
     return typeArray.includes('LoudSound')
   })
-  
+
   // Debug logging
   useEffect(() => {
     console.log('MomentDropdown render:', {
@@ -99,11 +99,11 @@ export default function MomentDropdown({
         moments.filter((m) => m.event_types.includes(selectedEventType))
       )
     }
-    
+
     // Track processing state
     const hadMoments = lastMomentCount > 0
     const hasMoments = moments.length > 0
-    
+
     // If we have moments now but didn't before, processing is complete
     if (hasMoments && !hadMoments) {
       setIsProcessing(false)
@@ -137,10 +137,10 @@ export default function MomentDropdown({
         processingTimeoutRef.current = null
       }
     }
-    
+
     setLastMomentCount(moments.length)
     setLoudSoundCount(loudSoundMoments.length)
-    
+
     // Cleanup timeout on unmount
     return () => {
       if (processingTimeoutRef.current) {
@@ -232,10 +232,10 @@ export default function MomentDropdown({
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
             </svg>
-            <p className="text-sm text-blue-700 font-medium">No loud sounds detected</p>
+            <p className="text-sm text-blue-700 font-medium">No loud sounds (gunshots/explosions) detected</p>
           </div>
           <p className="text-xs text-blue-600 mt-1 ml-7">
-            Audio analysis completed. No loud sounds (gunshots, yelling, sudden noises) were detected in this video.
+            Other audio events were detected, but no extremely loud sounds (gunshots, explosions, yelling) were found in this video.
           </p>
         </div>
       )}
@@ -250,7 +250,7 @@ export default function MomentDropdown({
             <p className="text-sm text-orange-700 font-medium">🔊 {loudSoundCount} loud sound{loudSoundCount !== 1 ? 's' : ''} detected</p>
           </div>
           <p className="text-xs text-orange-600 mt-1 ml-7">
-            {loudSoundCount === 1 
+            {loudSoundCount === 1
               ? 'A loud sound event was detected. Use the "Loud Sounds" filter to view it.'
               : `${loudSoundCount} loud sound events were detected. Use the "Loud Sounds" filter to view them.`}
           </p>

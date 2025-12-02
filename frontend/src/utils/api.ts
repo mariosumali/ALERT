@@ -54,6 +54,7 @@ export interface TranscriptionResponse {
   transcript: string
   segments: TranscriptionSegment[]
   has_transcription: boolean
+  status?: string
 }
 
 export interface TranscriptionSegment {
@@ -81,7 +82,7 @@ export async function downloadTranscript(fileId: string): Promise<void> {
   const response = await axios.get(url, {
     responseType: 'blob',
   })
-  
+
   // Create a blob URL and trigger download
   const blob = new Blob([response.data], { type: 'text/plain' })
   const blobUrl = window.URL.createObjectURL(blob)

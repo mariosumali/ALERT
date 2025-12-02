@@ -56,7 +56,8 @@ async def get_transcription(file_id: str = Query(..., description="File ID to ge
             "file_id": file_id,
             "transcript": file_metadata.transcript or "",
             "segments": file_metadata.transcript_segments or [],
-            "has_transcription": file_metadata.transcript is not None
+            "has_transcription": file_metadata.transcript is not None,
+            "status": file_metadata.status or "pending"
         })
     
     except HTTPException:
