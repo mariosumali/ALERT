@@ -124,7 +124,7 @@ function App() {
         console.log('Event types found:', eventTypes)
       }
       setMoments(moments)
-      
+
       // If we got moments, stop polling
       if (moments.length > 0 && momentsPollRef.current) {
         clearInterval(momentsPollRef.current)
@@ -184,16 +184,16 @@ function App() {
       setMoments([])
       return
     }
-    
+
     // Clear any existing polling
     if (momentsPollRef.current) {
       clearInterval(momentsPollRef.current)
       momentsPollRef.current = null
     }
-    
+
     // Initial fetch
     fetchMoments(fileId)
-    
+
     // Set up continuous polling until moments are found
     let pollCount = 0
     const maxPolls = 60 // 2 minutes
@@ -207,7 +207,7 @@ function App() {
       }
     }, 2000)
     momentsPollRef.current = pollInterval
-    
+
     return () => {
       if (momentsPollRef.current) {
         clearInterval(momentsPollRef.current)
@@ -298,6 +298,13 @@ function App() {
             {fileId && <ChatBot fileId={fileId} />}
           </div>
         </div>
+
+        <footer className="mt-12 text-center text-sm text-gray-500">
+          <p>
+            Created by Mario Sumali (msumali@stanford.edu) and Shane Mion (smion@stanford.edu) in collaboration with Big
+            Local News
+          </p>
+        </footer>
       </div>
     </div>
   )
