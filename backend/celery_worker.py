@@ -99,6 +99,153 @@ def save_comprehensive_transcript(file_id: str, file_path: str, transcript_text:
         print(f"[TRANSCRIPT FILE] Error: {e}")
         raise
 
+
+def save_ocr_metadata(file_id: str, file_path: str, ocr_metadata: dict, file_metadata: FileMetadata):
+    """
+    Save OCR extracted metadata to a file.
+    """
+    try:
+        # Create ocr_data directory
+        # file_path is typically ./uploads/{file_id}.mp4
+        # We want backend/ocr_data/
+        uploads_dir = os.path.dirname(os.path.abspath(file_path))
+        ocr_data_dir = os.path.join(uploads_dir, "..", "ocr_data")
+        ocr_data_dir = os.path.abspath(ocr_data_dir)
+        os.makedirs(ocr_data_dir, exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ocr_file = os.path.join(ocr_data_dir, f"{file_id}_{timestamp}.txt")
+        
+        with open(ocr_file, "w", encoding="utf-8") as f:
+            # Header
+            f.write("=" * 80 + "\n")
+            f.write("OCR EXTRACTED METADATA\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # File metadata
+            f.write("FILE INFORMATION\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"File ID: {file_id}\n")
+            f.write(f"Original Filename: {file_metadata.original_filename or 'N/A'}\n")
+            f.write(f"File Type: {file_metadata.file_type}\n")
+            f.write(f"File Path: {file_path}\n")
+            if file_metadata.duration:
+                f.write(f"Duration: {format_duration(file_metadata.duration)} ({file_metadata.duration:.2f} seconds)\n")
+            if file_metadata.file_size:
+                size_mb = file_metadata.file_size / (1024 * 1024)
+                f.write(f"File Size: {size_mb:.2f} MB\n")
+            f.write(f"Processed: {timestamp}\n")
+            f.write("\n")
+            
+            # OCR Metadata Section
+            f.write("=" * 80 + "\n")
+            f.write("EXTRACTED METADATA\n")
+            f.write("=" * 80 + "\n\n")
+            
+            if ocr_metadata:
+                if ocr_metadata.get("timestamp"):
+                    f.write(f"Timestamp: {ocr_metadata['timestamp']}\n")
+                if ocr_metadata.get("device_id"):
+                    f.write(f"Device ID: {ocr_metadata['device_id']}\n")
+                if ocr_metadata.get("device_model"):
+                    f.write(f"Device Model: {ocr_metadata['device_model']}\n")
+                if ocr_metadata.get("badge_number"):
+                    f.write(f"Badge Number: {ocr_metadata['badge_number']}\n")
+                if ocr_metadata.get("officer_id"):
+                    f.write(f"Officer ID: {ocr_metadata['officer_id']}\n")
+                
+                f.write("\n")
+                f.write("=" * 80 + "\n")
+                f.write("RAW OCR TEXT\n")
+                f.write("=" * 80 + "\n\n")
+                f.write(ocr_metadata.get("raw_text", "No raw text available."))
+                f.write("\n")
+            else:
+                f.write("No OCR metadata available.\n")
+        
+        print(f"[OCR FILE] Saved to: {ocr_file}")
+        return ocr_file
+        
+    except Exception as e:
+        print(f"[OCR FILE] Error: {e}")
+        raise
+
+
+def save_moments_of_interest(file_id: str, file_path: str, moments: list, file_metadata: FileMetadata):
+    """
+    Save detected moments of interest to a file.
+    """
+    try:
+        # Create moments directory
+        # file_path is typically ./uploads/{file_id}.mp4
+        # We want backend/moments/
+        uploads_dir = os.path.dirname(os.path.abspath(file_path))
+        moments_dir = os.path.join(uploads_dir, "..", "moments")
+        moments_dir = os.path.abspath(moments_dir)
+        os.makedirs(moments_dir, exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        moments_file = os.path.join(moments_dir, f"{file_id}_{timestamp}.txt")
+        
+        with open(moments_file, "w", encoding="utf-8") as f:
+            # Header
+            f.write("=" * 80 + "\n")
+            f.write("DETECTED MOMENTS OF INTEREST\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # File metadata
+            f.write("FILE INFORMATION\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"File ID: {file_id}\n")
+            f.write(f"Original Filename: {file_metadata.original_filename or 'N/A'}\n")
+            f.write(f"File Type: {file_metadata.file_type}\n")
+            f.write(f"File Path: {file_path}\n")
+            if file_metadata.duration:
+                f.write(f"Duration: {format_duration(file_metadata.duration)} ({file_metadata.duration:.2f} seconds)\n")
+            if file_metadata.file_size:
+                size_mb = file_metadata.file_size / (1024 * 1024)
+                f.write(f"File Size: {size_mb:.2f} MB\n")
+            f.write(f"Processed: {timestamp}\n")
+            f.write("\n")
+            
+            # Moments Section
+            f.write("=" * 80 + "\n")
+            f.write(f"DETECTED EVENTS ({len(moments)} total)\n")
+            f.write("=" * 80 + "\n\n")
+            
+            if moments:
+                for idx, moment in enumerate(moments, 1):
+                    event_types = moment.event_types if moment.event_types else ["Unknown"]
+                    event_type_str = ", ".join(event_types)
+                    
+                    # Format time as MM:SS
+                    start_mins = int(moment.start_time // 60)
+                    start_secs = int(moment.start_time % 60)
+                    end_mins = int(moment.end_time // 60)
+                    end_secs = int(moment.end_time % 60)
+                    time_str = f"{start_mins}:{start_secs:02d} - {end_mins}:{end_secs:02d}"
+                    
+                    confidence_pct = int(moment.interest_score * 100) if moment.interest_score else 0
+                    
+                    f.write(f"Event #{idx}: {event_type_str}\n")
+                    f.write(f"  Time: {time_str} ({moment.start_time:.1f}s - {moment.end_time:.1f}s)\n")
+                    f.write(f"  Confidence: {confidence_pct}%\n")
+                    if moment.description:
+                        f.write(f"  Description: {moment.description}\n")
+                    f.write(f"  Moment ID: {moment.moment_id}\n")
+                    f.write("\n")
+            else:
+                f.write("No moments of interest detected.\n")
+        
+        print(f"[MOMENTS FILE] Saved to: {moments_file}")
+        return moments_file
+        
+    except Exception as e:
+        print(f"[MOMENTS FILE] Error: {e}")
+        raise
+
 @celery_app.task(name="transcribe_and_detect")
 def transcribe_and_detect_task(file_id: str, file_path: str):
     """
@@ -151,13 +298,38 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             print(f"[OCR] Extracting metadata from video frames for {file_id}...")
             try:
                 ocr_metadata = extract_metadata_from_video(file_path)
-                if ocr_metadata and ocr_metadata.get("raw_text"):
+                # Check if we have any useful metadata (raw_text or any other field)
+                has_metadata = ocr_metadata and (
+                    ocr_metadata.get("raw_text") or 
+                    ocr_metadata.get("timestamp") or 
+                    ocr_metadata.get("device_id") or 
+                    ocr_metadata.get("device_model") or 
+                    ocr_metadata.get("badge_number") or 
+                    ocr_metadata.get("officer_id")
+                )
+                
+                if has_metadata:
                     file_metadata.ocr_metadata = ocr_metadata
                     db.commit()
                     print(f"[OCR] ✓ Extracted metadata for file {file_id}:")
                     for key, value in ocr_metadata.items():
                         if value and key != "raw_text":
                             print(f"[OCR]   {key}: {value}")
+                    
+                    # Save OCR metadata to file
+                    try:
+                        print(f"[OCR FILE] Saving OCR metadata to file...")
+                        save_ocr_metadata(
+                            file_id=file_id,
+                            file_path=file_path,
+                            ocr_metadata=ocr_metadata,
+                            file_metadata=file_metadata
+                        )
+                        print(f"[OCR FILE] ✓ OCR file saved")
+                    except Exception as e:
+                        print(f"[OCR FILE] ⚠ Error saving OCR file: {e}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"[OCR] No metadata found in video frames for file {file_id}")
             except Exception as e:
@@ -242,8 +414,71 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             if stored_count > 0:
                 db.commit()
                 print(f"[MOMENTS] ✓ Stored {stored_count} moments in database")
+                
+                # Save moments to file
+                try:
+                    # Query the stored moments from database
+                    stored_moments = db.query(MomentOfInterest).filter(MomentOfInterest.file_id == file_id).all()
+                    print(f"[MOMENTS FILE] Saving {len(stored_moments)} moments to file...")
+                    save_moments_of_interest(
+                        file_id=file_id,
+                        file_path=file_path,
+                        moments=stored_moments,
+                        file_metadata=file_metadata
+                    )
+                    print(f"[MOMENTS FILE] ✓ Moments file saved")
+                except Exception as e:
+                    print(f"[MOMENTS FILE] ⚠ Error saving moments file: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 print(f"[MOMENTS] No high-confidence anomalies to store")
+        
+        # Detect gunshots from transcript mentions and frequency analysis
+        gunshot_events = []
+        if transcript_segments and (extracted_audio_path or file_metadata.file_type == "audio"):
+            from services.gunshot_detection import detect_gunshots_from_transcript
+            print(f"[GUNSHOT DETECTION] Analyzing transcript for gunshot mentions...")
+            try:
+                audio_path_for_gunshot = extracted_audio_path if extracted_audio_path else file_path
+                gunshot_events = detect_gunshots_from_transcript(
+                    transcript_segments=transcript_segments,
+                    audio_path=audio_path_for_gunshot,
+                    duration=file_metadata.duration or 0.0
+                )
+                print(f"[GUNSHOT DETECTION] ✓ Found {len(gunshot_events)} gunshot events")
+            except Exception as e:
+                print(f"[GUNSHOT DETECTION] ⚠ Error detecting gunshots: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Store gunshot events as MomentOfInterest records
+        if gunshot_events:
+            from models.schema import MomentOfInterest
+            print(f"[GUNSHOT DETECTION] Storing {len(gunshot_events)} gunshot events as moments...")
+            
+            stored_gunshot_count = 0
+            for event in gunshot_events:
+                try:
+                    # Only store high-confidence events (≥0.7 for gunshots)
+                    if event.get('confidence', 0.0) >= 0.7:
+                        moment = MomentOfInterest(
+                            file_id=file_id,
+                            start_time=event['start_time'],
+                            end_time=event['end_time'],
+                            event_types=["Gunshot"],
+                            interest_score=event['confidence'],
+                            description=event['description']
+                        )
+                        db.add(moment)
+                        stored_gunshot_count += 1
+                        print(f"[GUNSHOT DETECTION]   - Gunshot at {event['start_time']:.1f}s-{event['end_time']:.1f}s (confidence: {event['confidence']:.2f})")
+                except Exception as e:
+                    print(f"[GUNSHOT DETECTION] ⚠ Failed to store gunshot moment: {e}")
+            
+            if stored_gunshot_count > 0:
+                db.commit()
+                print(f"[GUNSHOT DETECTION] ✓ Stored {stored_gunshot_count} gunshot moments in database")
         
         # Save comprehensive transcript file with timestamps and anomalies
         try:

@@ -73,3 +73,25 @@ async def upload_file(file: UploadFile = File(...)):
         print(f"Traceback: {error_trace}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
+
+@router.get("/files/{file_id}/metadata")
+async def get_file_metadata(file_id: str):
+    """
+    Retrieve file metadata, including OCR extracted info.
+    """
+    db = SessionLocal()
+    try:
+        file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        return {
+            "file_id": file_record.file_id,
+            "original_filename": file_record.original_filename,
+            "ocr_metadata": file_record.ocr_metadata,
+            "duration": file_record.duration,
+            "timestamp_start": file_record.timestamp_start
+        }
+    finally:
+        db.close()
+

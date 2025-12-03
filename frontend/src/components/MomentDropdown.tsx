@@ -21,6 +21,7 @@ export default function MomentDropdown({
   const [lastMomentCount, setLastMomentCount] = useState(0)
   const [lastFileId, setLastFileId] = useState<string | null | undefined>(fileId)
   const [loudSoundCount, setLoudSoundCount] = useState(0)
+  const [gunshotCount, setGunshotCount] = useState(0)
   const processingTimeoutRef = useRef<number | null>(null)
 
   // Reset processing state when file changes
@@ -74,6 +75,24 @@ export default function MomentDropdown({
       }
     }
     return typeArray.includes('LoudSound')
+  })
+
+  // Count gunshot moments
+  const gunshotMoments = moments.filter((m) => {
+    const types = m.event_types
+    if (!types) return false
+    let typeArray: string[] = []
+    if (Array.isArray(types)) {
+      typeArray = types
+    } else if (typeof types === 'string') {
+      try {
+        const parsed = JSON.parse(types)
+        typeArray = Array.isArray(parsed) ? parsed : []
+      } catch {
+        typeArray = []
+      }
+    }
+    return typeArray.includes('Gunshot')
   })
 
   // Debug logging
@@ -140,6 +159,7 @@ export default function MomentDropdown({
 
     setLastMomentCount(moments.length)
     setLoudSoundCount(loudSoundMoments.length)
+    setGunshotCount(gunshotMoments.length)
 
     // Cleanup timeout on unmount
     return () => {
@@ -168,13 +188,18 @@ export default function MomentDropdown({
           className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="all">All Events {moments.length > 0 && `(${eventTypes.length} types)`}</option>
+          {eventTypes.includes('Gunshot') && (
+            <option value="Gunshot">
+              🔫 Gunshots {gunshotCount > 0 && `(${gunshotCount})`}
+            </option>
+          )}
           {eventTypes.includes('LoudSound') && (
             <option value="LoudSound">
               🔊 Loud Sounds {loudSoundCount > 0 && `(${loudSoundCount})`}
             </option>
           )}
           {eventTypes.length > 0 ? (
-            eventTypes.filter(type => type !== 'LoudSound').map((type) => (
+            eventTypes.filter(type => type !== 'LoudSound' && type !== 'Gunshot').map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
@@ -232,10 +257,42 @@ export default function MomentDropdown({
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
             </svg>
-            <p className="text-sm text-blue-700 font-medium">No loud sounds (gunshots/explosions) detected</p>
+            <p className="text-sm text-blue-700 font-medium">No (particularly)loud sounds detected</p>
           </div>
           <p className="text-xs text-blue-600 mt-1 ml-7">
-            Other audio events were detected, but no extremely loud sounds (gunshots, explosions, yelling) were found in this video.
+            Other audio events were detected
+          </p>
+        </div>
+      )}
+
+      {/* No Gunshots indicator */}
+      {hasCompleted && moments.length > 0 && gunshotCount === 0 && !isProcessing && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-sm text-gray-700 font-medium">No gunshots detected</p>
+          </div>
+          <p className="text-xs text-gray-600 mt-1 ml-7">
+            No gunshot events were identified in the transcript or audio analysis.
+          </p>
+        </div>
+      )}
+
+      {/* Gunshots found indicator */}
+      {hasCompleted && gunshotCount > 0 && !isProcessing && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-sm text-red-700 font-medium">
+              {gunshotCount} gunshot{gunshotCount !== 1 ? 's' : ''} detected
+            </p>
+          </div>
+          <p className="text-xs text-red-600 mt-1 ml-7">
+            Gunshots were detected based on transcript mentions and frequency analysis.
           </p>
         </div>
       )}
@@ -301,14 +358,34 @@ export default function MomentDropdown({
                     {formatTime(moment.start_time)} - {formatTime(moment.end_time)}
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
-                    {moment.event_types.map((type, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded mr-1 mb-1"
-                      >
-                        {type}
-                      </span>
-                    ))}
+                    {moment.event_types.map((type, idx) => {
+                      // Different colors for different event types
+                      let bgColor = 'bg-blue-100'
+                      let textColor = 'text-blue-800'
+
+                      if (type === 'Gunshot') {
+                        bgColor = 'bg-red-100'
+                        textColor = 'text-red-800'
+                      } else if (type === 'LoudSound') {
+                        bgColor = 'bg-orange-100'
+                        textColor = 'text-orange-800'
+                      } else if (type === 'Silence') {
+                        bgColor = 'bg-gray-100'
+                        textColor = 'text-gray-800'
+                      } else if (type === 'FrequencyAnomaly') {
+                        bgColor = 'bg-purple-100'
+                        textColor = 'text-purple-800'
+                      }
+
+                      return (
+                        <span
+                          key={idx}
+                          className={`inline-block px-2 py-1 ${bgColor} ${textColor} rounded mr-1 mb-1`}
+                        >
+                          {type}
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
                 <div className="text-right">

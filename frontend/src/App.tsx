@@ -4,6 +4,7 @@ import VideoPlayer from './components/VideoPlayer'
 import MomentDropdown from './components/MomentDropdown'
 import TranscriptionView from './components/TranscriptionView'
 import ChatBot from './components/ChatBot'
+import BodyCamInfo from './components/BodyCamInfo'
 import { transcribeFile, downloadTranscript } from './utils/api'
 import StatusBanner, { StatusBannerVariant } from './components/StatusBanner'
 import type { TranscriptionStatusPayload, TranscriptionStatusState } from './types/transcription'
@@ -31,6 +32,9 @@ function App() {
   const [transcribing, setTranscribing] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [statusBanner, setStatusBanner] = useState<BannerState | null>(null)
+  const [fileMetadata, setFileMetadata] = useState<any>(null)
+  const [loadingMetadata, setLoadingMetadata] = useState(false)
+
   const momentsPollRef = useRef<number | null>(null)
   const lastTranscriptionState = useRef<TranscriptionStatusState | null>(null)
 
@@ -43,6 +47,7 @@ function App() {
     setFileId(newFileId)
     setVideoUrl(fileUrl)
     setMoments([])
+    setFileMetadata(null)
 
     setStatusBanner({
       variant: 'success',
@@ -136,6 +141,21 @@ function App() {
     }
   }
 
+  const fetchFileMetadata = async (id: string) => {
+    setLoadingMetadata(true)
+    try {
+      const response = await fetch(`/api/files/${id}/metadata`)
+      if (response.ok) {
+        const data = await response.json()
+        setFileMetadata(data.ocr_metadata)
+      }
+    } catch (error) {
+      console.error('Failed to fetch metadata:', error)
+    } finally {
+      setLoadingMetadata(false)
+    }
+  }
+
   const handleTranscriptionStatusChange = (payload: TranscriptionStatusPayload) => {
     if (lastTranscriptionState.current === payload.state && !payload.detail) {
       return
@@ -178,10 +198,11 @@ function App() {
     }
   }
 
-  // Fetch moments when fileId changes
+  // Fetch moments and metadata when fileId changes
   useEffect(() => {
     if (!fileId) {
       setMoments([])
+      setFileMetadata(null)
       return
     }
 
@@ -193,6 +214,7 @@ function App() {
 
     // Initial fetch
     fetchMoments(fileId)
+    fetchFileMetadata(fileId)
 
     // Set up continuous polling until moments are found
     let pollCount = 0
@@ -208,11 +230,17 @@ function App() {
     }, 2000)
     momentsPollRef.current = pollInterval
 
+    // Poll for metadata too, as OCR might take time
+    const metadataInterval = setInterval(() => {
+      fetchFileMetadata(fileId)
+    }, 5000)
+
     return () => {
       if (momentsPollRef.current) {
         clearInterval(momentsPollRef.current)
         momentsPollRef.current = null
       }
+      clearInterval(metadataInterval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId])
@@ -245,6 +273,8 @@ function App() {
 
             {fileId && (
               <>
+                <BodyCamInfo metadata={fileMetadata} isLoading={loadingMetadata} />
+
                 <div className="rounded-lg bg-white p-6 shadow-md">
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="text-2xl font-semibold">Transcription</h2>

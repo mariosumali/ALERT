@@ -144,6 +144,39 @@ async def chat_with_transcript(request: ChatRequest):
                     moments_context += f"  Description: {moment.description}\n"
                 moments_context += "\n"
         
+        # Get OCR metadata if available
+        ocr_context = ""
+        if file_metadata.ocr_metadata:
+            ocr_metadata = file_metadata.ocr_metadata
+            # If ocr_metadata is a JSON string, parse it
+            if isinstance(ocr_metadata, str):
+                try:
+                    ocr_metadata = json.loads(ocr_metadata)
+                except:
+                    ocr_metadata = {}
+            
+            if ocr_metadata and any(v for k, v in ocr_metadata.items() if k != "raw_text" and v):
+                ocr_context = "\n\nOCR Extracted Metadata:\n"
+                ocr_context += "The following information was extracted from video frames using OCR:\n\n"
+                
+                if ocr_metadata.get("timestamp"):
+                    ocr_context += f"- Timestamp: {ocr_metadata['timestamp']}\n"
+                if ocr_metadata.get("device_id"):
+                    ocr_context += f"- Device ID: {ocr_metadata['device_id']}\n"
+                if ocr_metadata.get("device_model"):
+                    ocr_context += f"- Device Model: {ocr_metadata['device_model']}\n"
+                if ocr_metadata.get("badge_number"):
+                    ocr_context += f"- Badge Number: {ocr_metadata['badge_number']}\n"
+                if ocr_metadata.get("officer_id"):
+                    ocr_context += f"- Officer ID: {ocr_metadata['officer_id']}\n"
+                if ocr_metadata.get("raw_text"):
+                    ocr_context += f"- Raw OCR Text: {ocr_metadata['raw_text'][:500]}"  # Limit to first 500 chars
+                    if len(ocr_metadata.get("raw_text", "")) > 500:
+                        ocr_context += "...\n"
+                    else:
+                        ocr_context += "\n"
+                ocr_context += "\n"
+        
         
         messages = [
             {
@@ -152,16 +185,19 @@ async def chat_with_transcript(request: ChatRequest):
 You have access to:
 1. The full transcript of a video, including timestamps for each segment
 2. Video metadata
-3. Automatically detected events (such as loud sounds, silences, and audio anomalies)
+3. Automatically detected events (such as **Gunshots**, loud sounds, silences, and audio anomalies)
+4. OCR extracted metadata from video frames (timestamps, device information, etc.)
 
 When answering questions:
 - Reference specific timestamps when relevant (format: MM:SS or seconds)
-- When asked about events or moments, reference the detected events provided
+- When asked about events or moments, reference the detected events provided. **Pay special attention to Gunshot events.**
+- When asked about device information, timestamps, or metadata visible in the video, use the OCR extracted metadata.
+- If asked about "shots fired" or "shootings", look for both "Gunshot" events and mentions in the transcript.
 - Be concise and helpful
-- If asked about something not in the transcript or events, say so clearly
+- If asked about something not in the transcript, events, or OCR metadata, say so clearly
 
 {metadata_context}
-{transcript_context}{moments_context}"""
+{transcript_context}{moments_context}{ocr_context}"""
             }
         ]
         

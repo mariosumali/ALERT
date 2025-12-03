@@ -179,9 +179,9 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     if len(rms) == 0 or rms_max <= 0:
         return anomalies
     
-    # MUCH STRICTER threshold: 4.5 std above mean, or top 1% of energy values
+    # MUCH STRICTER threshold: 4.2 std above mean, or top 1% of energy values
     # This ensures only EXTREMELY loud sounds are detected
-    threshold_statistical = rms_mean + 4.5 * rms_std
+    threshold_statistical = rms_mean + 4.2 * rms_std
     
     # Use percentile-based threshold as primary method (top 1%)
     percentile_99 = np.percentile(rms, 99) if len(rms) > 0 else rms_max * 0.99
@@ -190,8 +190,8 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     # Use the stricter of the two methods, but ensure it's at least 95th percentile
     threshold = max(threshold_statistical, percentile_95)
     
-    # Additional requirement: must be at least 3x the mean energy
-    threshold = max(threshold, rms_mean * 3.0)
+    # Additional requirement: must be at least 2.8x the mean energy
+    threshold = max(threshold, rms_mean * 2.8)
     
     # Minimum duration for loud sound (0.1 to 2.0 seconds)
     min_duration = 0.1
@@ -209,7 +209,7 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     for i, (time, energy) in enumerate(zip(rms_times, rms)):
         # Must exceed threshold AND be significantly louder than local context
         local_avg = rolling_avg[i] if i < len(rolling_avg) else rms_mean
-        context_multiplier = 2.5  # Must be at least 2.5x louder than local context
+        context_multiplier = 2.3  # Must be at least 2.3x louder than local context
         
         if energy > threshold and energy > local_avg * context_multiplier:
             if not in_loud_period:
@@ -229,10 +229,10 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
                     mean_ratio = peak_energy / (rms_mean + 0.001)
                     context_ratio = peak_energy / (local_avg + 0.001)
                     
-                    # Only mark if EXTREMELY loud (top 2% of max, 4x mean, 3x context)
-                    if intensity_ratio > 0.98 and mean_ratio > 4.0 and context_ratio > 3.0:
+                    # Only mark if EXTREMELY loud (top 2% of max, 3.8x mean, 2.8x context)
+                    if intensity_ratio > 0.97 and mean_ratio > 3.8 and context_ratio > 2.8:
                         category = "LoudSound"
-                        description = f"EXTREMELY loud sound detected (gunshot/explosion-like, {loud_duration:.2f}s, {mean_ratio:.1f}x mean)"
+                        description = f"Loud sound detected. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean"
                         confidence = min(0.95, 0.85 + min(intensity_ratio - 0.98, 0.1) * 10)
                         
                         # Only include if confidence >= 0.8
@@ -257,7 +257,7 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
             intensity_ratio = peak_energy / rms_max
             mean_ratio = peak_energy / (rms_mean + 0.001)
             
-            if intensity_ratio > 0.98 and mean_ratio > 4.0:
+            if intensity_ratio > 0.97 and mean_ratio > 3.8:
                 confidence = min(0.95, 0.85 + min(intensity_ratio - 0.98, 0.1) * 10)
                 # Only include if confidence >= 0.8
                 if confidence >= 0.8:
@@ -266,7 +266,7 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
                         "end_time": duration,
                         "category": "LoudSound",
                         "confidence": confidence,
-                        "description": f"EXTREMELY loud sound at end ({loud_duration:.2f}s, {mean_ratio:.1f}x mean)",
+                        "description": f"Loud sound detected. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean",
                         "intensity": float(intensity_ratio)
                     })
     
