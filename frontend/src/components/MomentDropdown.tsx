@@ -95,6 +95,26 @@ export default function MomentDropdown({
     return typeArray.includes('Gunshot')
   })
 
+  // Count profanity moments
+  const profanityMoments = moments.filter((m) => {
+    const types = m.event_types
+    if (!types) return false
+    let typeArray: string[] = []
+    if (Array.isArray(types)) {
+      typeArray = types
+    } else if (typeof types === 'string') {
+      try {
+        const parsed = JSON.parse(types)
+        typeArray = Array.isArray(parsed) ? parsed : []
+      } catch {
+        typeArray = []
+      }
+    }
+    return typeArray.includes('Profanity')
+  })
+
+  const profanityCount = profanityMoments.length
+
   // Debug logging
   useEffect(() => {
     console.log('MomentDropdown render:', {
@@ -198,8 +218,13 @@ export default function MomentDropdown({
               🔊 Loud Sounds {loudSoundCount > 0 && `(${loudSoundCount})`}
             </option>
           )}
+          {eventTypes.includes('Profanity') && ( // Added: Profanity option
+            <option value="Profanity">
+              🤬 Profanity {profanityCount > 0 && `(${profanityCount})`}
+            </option>
+          )}
           {eventTypes.length > 0 ? (
-            eventTypes.filter(type => type !== 'LoudSound' && type !== 'Gunshot').map((type) => (
+            eventTypes.filter(type => type !== 'LoudSound' && type !== 'Gunshot' && type !== 'Profanity').map((type) => ( // Modified: Filter out Profanity
               <option key={type} value={type}>
                 {type}
               </option>
@@ -280,6 +305,21 @@ export default function MomentDropdown({
         </div>
       )}
 
+      {/* No Profanity indicator */}
+      {hasCompleted && moments.length > 0 && profanityCount === 0 && !isProcessing && ( // Added: No Profanity indicator
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-sm text-gray-700 font-medium">No profanity detected</p>
+          </div>
+          <p className="text-xs text-gray-600 mt-1 ml-7">
+            No profanity events were identified in the transcript or audio analysis.
+          </p>
+        </div>
+      )}
+
       {/* Gunshots found indicator */}
       {hasCompleted && gunshotCount > 0 && !isProcessing && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
@@ -310,6 +350,23 @@ export default function MomentDropdown({
             {loudSoundCount === 1
               ? 'A loud sound event was detected. Use the "Loud Sounds" filter to view it.'
               : `${loudSoundCount} loud sound events were detected. Use the "Loud Sounds" filter to view them.`}
+          </p>
+        </div>
+      )}
+
+      {/* Profanity found indicator */}
+      {hasCompleted && profanityCount > 0 && !isProcessing && ( // Added: Profanity found indicator
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-sm text-purple-700 font-medium">🤬 {profanityCount} profanity event{profanityCount !== 1 ? 's' : ''} detected</p>
+          </div>
+          <p className="text-xs text-purple-600 mt-1 ml-7">
+            {profanityCount === 1
+              ? 'A profanity event was detected. Use the "Profanity" filter to view it.'
+              : `${profanityCount} profanity events were detected. Use the "Profanity" filter to view them.`}
           </p>
         </div>
       )}
@@ -369,6 +426,9 @@ export default function MomentDropdown({
                       } else if (type === 'LoudSound') {
                         bgColor = 'bg-orange-100'
                         textColor = 'text-orange-800'
+                      } else if (type === 'Profanity') { // Added: Profanity styling
+                        bgColor = 'bg-purple-100'
+                        textColor = 'text-purple-800'
                       } else if (type === 'Silence') {
                         bgColor = 'bg-gray-100'
                         textColor = 'text-gray-800'

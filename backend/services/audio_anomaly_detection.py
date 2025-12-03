@@ -171,17 +171,17 @@ def analyze_audio_anomalies(audio_path: str) -> List[Dict]:
 def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float, 
                        rms_std: float, rms_max: float, duration: float) -> List[Dict]:
     """
-    Detect EXTREMELY loud sound anomalies (gunshots, explosions, yelling).
-    Very strict: only marks sounds that are significantly louder than the rest of the video.
+    Detect loud sound anomalies (gunshots, explosions, yelling).
+    Less stringent: marks sounds that are 4.5+ std above mean.
+    Only high-confidence events (>=0.90) are tagged as LoudSound.
     """
     anomalies = []
     
     if len(rms) == 0 or rms_max <= 0:
         return anomalies
     
-    # MUCH STRICTER threshold: 4.2 std above mean, or top 1% of energy values
-    # This ensures only EXTREMELY loud sounds are detected
-    threshold_statistical = rms_mean + 4.2 * rms_std
+    # Less strict threshold: 4.5 std above mean, or top 1% of energy values
+    threshold_statistical = rms_mean + 4.5 * rms_std
     
     # Use percentile-based threshold as primary method (top 1%)
     percentile_99 = np.percentile(rms, 99) if len(rms) > 0 else rms_max * 0.99
@@ -190,8 +190,8 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     # Use the stricter of the two methods, but ensure it's at least 95th percentile
     threshold = max(threshold_statistical, percentile_95)
     
-    # Additional requirement: must be at least 2.8x the mean energy
-    threshold = max(threshold, rms_mean * 2.8)
+    # Additional requirement: must be at least 2.0x the mean energy (relaxed from 2.8)
+    threshold = max(threshold, rms_mean * 2.0)
     
     # Minimum duration for loud sound (0.1 to 2.0 seconds)
     min_duration = 0.1
@@ -204,12 +204,12 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     in_loud_period = False
     loud_start = None
     
-    print(f"[LOUD SOUND] Strict thresholds: statistical={threshold_statistical:.4f}, percentile_99={percentile_99:.4f}, final={threshold:.4f}, mean={rms_mean:.4f}")
+    print(f"[LOUD SOUND] Relaxed thresholds (4.5std): statistical={threshold_statistical:.4f}, percentile_99={percentile_99:.4f}, final={threshold:.4f}, mean={rms_mean:.4f}")
     
     for i, (time, energy) in enumerate(zip(rms_times, rms)):
         # Must exceed threshold AND be significantly louder than local context
         local_avg = rolling_avg[i] if i < len(rolling_avg) else rms_mean
-        context_multiplier = 2.3  # Must be at least 2.3x louder than local context
+        context_multiplier = 1.8  # Relaxed from 2.3 - must be at least 1.8x louder than local context
         
         if energy > threshold and energy > local_avg * context_multiplier:
             if not in_loud_period:
@@ -229,14 +229,14 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
                     mean_ratio = peak_energy / (rms_mean + 0.001)
                     context_ratio = peak_energy / (local_avg + 0.001)
                     
-                    # Only mark if EXTREMELY loud (top 2% of max, 3.8x mean, 2.8x context)
-                    if intensity_ratio > 0.97 and mean_ratio > 3.8 and context_ratio > 2.8:
+                    # Relaxed criteria: top 10% of max (0.90), 2.5x mean, 2.0x context
+                    if intensity_ratio > 0.90 and mean_ratio > 2.5 and context_ratio > 2.0:
                         category = "LoudSound"
                         description = f"Loud sound detected. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean"
-                        confidence = min(0.95, 0.85 + min(intensity_ratio - 0.98, 0.1) * 10)
+                        confidence = min(0.95, 0.75 + min(intensity_ratio - 0.90, 0.1) * 10)
                         
-                        # Only include if confidence >= 0.8
-                        if confidence >= 0.8:
+                        # Only include if confidence >= 0.90
+                        if confidence >= 0.90:
                             anomalies.append({
                                 "start_time": max(0.0, loud_start - 0.2),
                                 "end_time": min(duration, time + 0.2),
@@ -257,20 +257,20 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
             intensity_ratio = peak_energy / rms_max
             mean_ratio = peak_energy / (rms_mean + 0.001)
             
-            if intensity_ratio > 0.97 and mean_ratio > 3.8:
-                confidence = min(0.95, 0.85 + min(intensity_ratio - 0.98, 0.1) * 10)
-                # Only include if confidence >= 0.8
-                if confidence >= 0.8:
+            if intensity_ratio > 0.90 and mean_ratio > 2.5:
+                confidence = min(0.95, 0.75 + min(intensity_ratio - 0.90, 0.1) * 10)
+                # Only include if confidence >= 0.90
+                if confidence >= 0.90:
                     anomalies.append({
                         "start_time": max(0.0, loud_start - 0.2),
                         "end_time": duration,
                         "category": "LoudSound",
                         "confidence": confidence,
-                        "description": f"Loud sound detected. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean",
+                        "description": f"Loud sound at end. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean",
                         "intensity": float(intensity_ratio)
                     })
     
-    print(f"[LOUD SOUND] Detected {len(anomalies)} extremely loud sounds (strict criteria)")
+    print(f"[LOUD SOUND] Detected {len(anomalies)} loud sound events")
     return anomalies
 
 
@@ -481,6 +481,7 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
     """
     Detect EXTREME frequency-based anomalies (unusual frequency content).
     Very strict: only marks frequency content that is dramatically different from normal.
+    Extreme anomalies (4+ std) are also tagged as LoudSound.
     """
     anomalies = []
     
@@ -511,12 +512,14 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
         is_anomaly = False
         anomaly_score = 0
         description_parts = []
+        max_deviation = 0.0
         
         # Check for EXTREME high frequency anomalies (3.5 std)
         if centroid > centroid_high_threshold:
             is_anomaly = True
             anomaly_score += 1
             deviation = (centroid - centroid_mean) / (centroid_std + 0.001)
+            max_deviation = max(max_deviation, deviation)
             description_parts.append(f"EXTREME high frequency ({deviation:.1f} std)")
         
         # Check for EXTREME low frequency anomalies (3.5 std)
@@ -524,6 +527,7 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
             is_anomaly = True
             anomaly_score += 1
             deviation = (centroid_mean - centroid) / (centroid_std + 0.001)
+            max_deviation = max(max_deviation, deviation)
             description_parts.append(f"EXTREME low frequency ({deviation:.1f} std)")
         
         # Check for EXTREME spectral rolloff
@@ -531,6 +535,7 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
             is_anomaly = True
             anomaly_score += 1
             deviation = (rolloff - rolloff_mean) / (rolloff_std + 0.001)
+            max_deviation = max(max_deviation, deviation)
             description_parts.append(f"EXTREME spectral rolloff ({deviation:.1f} std)")
         
         # Check for EXTREME zero crossing rate (indicates severe noise or distortion)
@@ -538,6 +543,7 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
             is_anomaly = True
             anomaly_score += 1
             deviation = (zcr - zcr_mean) / (zcr_std + 0.001)
+            max_deviation = max(max_deviation, deviation)
             description_parts.append(f"EXTREME zero crossing rate ({deviation:.1f} std)")
         
         # Only mark if multiple indicators OR single very extreme indicator (4+ std)
@@ -550,13 +556,15 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
                     'start_time': time,
                     'end_time': time,
                     'descriptions': description_parts,
-                    'score': anomaly_score
+                    'score': anomaly_score,
+                    'max_deviation': max_deviation
                 }
             else:
                 # Extend current group
                 current_group['end_time'] = time
                 current_group['descriptions'].extend(description_parts)
                 current_group['score'] = max(current_group['score'], anomaly_score)
+                current_group['max_deviation'] = max(current_group['max_deviation'], max_deviation)
     
     if current_group is not None:
         anomaly_groups.append(current_group)
@@ -570,10 +578,20 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
             
             # Only include if confidence >= 0.8
             if confidence >= 0.8:
+                # Determine if this should also be tagged as LoudSound
+                # Criteria: (score >= 3 OR max_deviation >= 4.0) AND confidence >= 0.90
+                is_loud = (group['score'] >= 3 or group['max_deviation'] >= 4.0) and confidence >= 0.90
+                
+                if is_loud:
+                    # Add as both FrequencyAnomaly AND LoudSound
+                    categories = ["FrequencyAnomaly", "LoudSound"]
+                else:
+                    categories = ["FrequencyAnomaly"]
+                
                 anomalies.append({
                     "start_time": max(0.0, group['start_time'] - 0.2),
                     "end_time": min(duration, group['end_time'] + 0.2),
-                    "category": "FrequencyAnomaly",
+                    "category": categories,
                     "confidence": confidence,
                     "description": f"EXTREME frequency anomaly: {', '.join(unique_descriptions)}",
                     "intensity": float(min(group['score'] / 4.0, 1.0))
