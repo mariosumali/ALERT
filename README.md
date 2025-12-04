@@ -1,4 +1,5 @@
-# Multimedia Event Parsing Platform
+# ALERT
+# Created by Mario Sumali & Shane Mion
 
 A full-stack platform that lets users upload long audio/video files, automatically transcribes them, detects "moments of interest," and displays those moments in a searchable web UI.
 
