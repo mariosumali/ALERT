@@ -190,7 +190,7 @@ Get detected moments of interest.
 }
 ```
 
-## Model Training
+## Model Training (BETA FEATURE)
 
 To train the event detector model:
 
