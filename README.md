@@ -1,4 +1,5 @@
 # ALERT — Audio-Visual Log Event Recognition Toolkit
+# Created by Mario Sumali & Shane Mion
 
 A toolkit for uploading, transcribing, and detecting events in long audio/video files, with a searchable web UI.
 
