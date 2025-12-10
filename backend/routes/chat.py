@@ -6,6 +6,8 @@ from models.schema import FileMetadata
 from openai import OpenAI
 import os
 import json
+from services.frame_extraction import extract_frame_at_timestamp, frame_to_base64
+from utils.timestamp_parser import parse_timestamps, format_timestamp
 
 router = APIRouter()
 
@@ -23,6 +25,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: ChatMessage
     usage: Optional[dict] = None
+    visual_analysis_used: Optional[bool] = False
+    analyzed_timestamps: Optional[List[float]] = None
 
 
 def _get_openai_client():
@@ -38,6 +42,7 @@ async def chat_with_transcript(request: ChatRequest):
     """
     Chat with GPT using the video transcript as context.
     Automatically includes the transcript in the system message.
+    If timestamps are detected in the user's question, extracts and analyzes video frames using GPT-4o Vision.
     """
     db = SessionLocal()
     try:
@@ -48,6 +53,28 @@ async def chat_with_transcript(request: ChatRequest):
         
         if not file_metadata.transcript:
             raise HTTPException(status_code=400, detail="No transcript available for this file. Please transcribe the video first.")
+        
+        # Check if the latest user message contains timestamp references
+        user_message = request.messages[-1].content if request.messages else ""
+        timestamps = parse_timestamps(user_message)
+        
+        # Get video file path
+        video_path = os.path.join("uploads", f"{request.file_id}.mp4")
+        
+        # Extract frames if timestamps are detected
+        visual_analysis_used = False
+        frame_contexts = []
+        if timestamps and os.path.exists(video_path):
+            visual_analysis_used = True
+            for timestamp in timestamps[:3]:  # Limit to 3 frames to avoid token limits
+                frame_bytes = extract_frame_at_timestamp(video_path, timestamp)
+                if frame_bytes:
+                    frame_base64 = frame_to_base64(frame_bytes)
+                    frame_contexts.append({
+                        "timestamp": timestamp,
+                        "formatted_time": format_timestamp(timestamp),
+                        "image_base64": frame_base64
+                    })
         
         # Prepare transcript context
         transcript_text = file_metadata.transcript
@@ -202,16 +229,45 @@ When answering questions:
         ]
         
         # Add user messages (converting from request format)
-        for msg in request.messages:
-            messages.append({
-                "role": msg.role,
-                "content": msg.content
-            })
+        # For visual analysis, we need to format the last message differently
+        for i, msg in enumerate(request.messages):
+            is_last_message = (i == len(request.messages) - 1)
+            
+            if is_last_message and visual_analysis_used and frame_contexts:
+                # Build content with text and images for vision API
+                content_parts = [{"type": "text", "text": msg.content}]
+                
+                for frame_ctx in frame_contexts:
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame_ctx['image_base64']}",
+                            "detail": "high"
+                        }
+                    })
+                    content_parts.append({
+                        "type": "text",
+                        "text": f"[Frame extracted at {frame_ctx['formatted_time']}]"
+                    })
+                
+                messages.append({
+                    "role": msg.role,
+                    "content": content_parts
+                })
+            else:
+                messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
         
         try:
             client = _get_openai_client()
+            
+            # Use GPT-4o when visual analysis is needed, otherwise use GPT-4o-mini
+            model = "gpt-4o" if visual_analysis_used else os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+            
             response = client.chat.completions.create(
-                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                model=model,
                 messages=messages,
                 temperature=0.7,
             )
@@ -227,7 +283,9 @@ When answering questions:
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
-                } if response.usage else None
+                } if response.usage else None,
+                visual_analysis_used=visual_analysis_used,
+                analyzed_timestamps=timestamps if visual_analysis_used else None
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error calling OpenAI API: {str(e)}")
