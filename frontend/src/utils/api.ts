@@ -107,6 +107,8 @@ export interface ChatResponse {
     completion_tokens: number
     total_tokens: number
   }
+  visual_analysis_used?: boolean
+  analyzed_timestamps?: number[]
 }
 
 export async function chatWithTranscript(
