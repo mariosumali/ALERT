@@ -2,9 +2,12 @@
 
 # Quick start script for local development
 
-echo "🚀 Starting Multimedia Event Parsing Platform..."
-
-# Check if Docker is running
+echo "🚀 Starting ALERT — Audio-Visual Log Event Recognition Toolkit..."
+source .env
+if [ -z "$OPENAI_API_KEY" ]; then
+  echo "❌ OPENAI_API_KEY not set in .env. Please set it."
+  exit 1
+fi
 if ! docker info > /dev/null 2>&1; then
     echo "❌ Docker is not running. Please start Docker and try again."
     exit 1

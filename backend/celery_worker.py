@@ -397,17 +397,25 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
                 try:
                     # Only store high-confidence anomalies (≥0.8)
                     if anomaly.get('confidence', 0.0) >= 0.8:
+                        # Handle category as either string or list
+                        category = anomaly['category']
+                        if isinstance(category, list):
+                            event_types = category
+                        else:
+                            event_types = [category]
+                        
                         moment = MomentOfInterest(
                             file_id=file_id,
                             start_time=anomaly['start_time'],
                             end_time=anomaly['end_time'],
-                            event_types=[anomaly['category']],  # e.g., ["LoudSound", "Distortion"]
+                            event_types=event_types,
                             interest_score=anomaly['confidence'],
                             description=anomaly['description']
                         )
                         db.add(moment)
                         stored_count += 1
-                        print(f"[MOMENTS]   - {anomaly['category']} at {anomaly['start_time']:.1f}s-{anomaly['end_time']:.1f}s (confidence: {anomaly['confidence']:.2f})")
+                        category_str = ", ".join(event_types) if isinstance(event_types, list) else event_types
+                        print(f"[MOMENTS]   - {category_str} at {anomaly['start_time']:.1f}s-{anomaly['end_time']:.1f}s (confidence: {anomaly['confidence']:.2f})")
                 except Exception as e:
                     print(f"[MOMENTS] ⚠ Failed to store moment: {e}")
             
@@ -479,6 +487,50 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
             if stored_gunshot_count > 0:
                 db.commit()
                 print(f"[GUNSHOT DETECTION] ✓ Stored {stored_gunshot_count} gunshot moments in database")
+        
+        # PROFANITY DETECTION
+        profanity_events = []
+        if transcript_segments:
+            from services.profanity_detection import detect_profanity_from_transcript
+            print("[PROFANITY DETECTION] Analyzing transcript for profanity...")
+            try:
+                profanity_events = detect_profanity_from_transcript(
+                    transcript_segments=transcript_segments,
+                    duration=file_metadata.duration or 0.0
+                )
+                print(f"[PROFANITY DETECTION] ✓ Found {len(profanity_events)} profanity events")
+            except Exception as e:
+                print(f"[PROFANITY DETECTION] ⚠ Error detecting profanity: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Store profanity events as MomentOfInterest records
+        if profanity_events:
+            from models.schema import MomentOfInterest
+            print(f"[PROFANITY DETECTION] Storing {len(profanity_events)} profanity events as moments...")
+            
+            stored_profanity_count = 0
+            for event in profanity_events:
+                try:
+                    # Only store high-confidence events (≥0.7 for profanity)
+                    if event.get('confidence', 0.0) >= 0.7:
+                        moment = MomentOfInterest(
+                            file_id=file_id,
+                            start_time=event['start_time'],
+                            end_time=event['end_time'],
+                            event_types=["Profanity"],
+                            interest_score=event['confidence'],
+                            description=event['description']
+                        )
+                        db.add(moment)
+                        stored_profanity_count += 1
+                        print(f"[PROFANITY DETECTION]   - Profanity at {event['start_time']:.1f}s-{event['end_time']:.1f}s (confidence: {event['confidence']:.2f})")
+                except Exception as e:
+                    print(f"[PROFANITY DETECTION] ⚠ Failed to store profanity moment: {e}")
+            
+            if stored_profanity_count > 0:
+                db.commit()
+                print(f"[PROFANITY DETECTION] ✓ Stored {stored_profanity_count} profanity moments in database")
         
         # Save comprehensive transcript file with timestamps and anomalies
         try:

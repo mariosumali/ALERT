@@ -1,6 +1,7 @@
-# Multimedia Event Parsing Platform
+# ALERT — Audio-Visual Log Event Recognition Toolkit
+# Created by Mario Sumali & Shane Mion
 
-A full-stack platform that lets users upload long audio/video files, automatically transcribes them, detects "moments of interest," and displays those moments in a searchable web UI.
+A toolkit for uploading, transcribing, and detecting events in long audio/video files, with a searchable web UI.
 
 ## Architecture
 
@@ -56,6 +57,7 @@ A full-stack platform that lets users upload long audio/video files, automatical
 ### Prerequisites
 
 - Docker and Docker Compose
+- Create a `.env` file with `OPENAI_API_KEY=your-key`
 - OR Python 3.11+, Node.js 18+, PostgreSQL, Redis
 
 ### Option 1: Docker Compose (Recommended)
@@ -215,40 +217,6 @@ To train the event detector model:
 
 ### Frontend
 - `VITE_API_BASE_URL`: Backend API URL (default: `/api`)
-
-## Current Implementation Status
-
-✅ **Completed:**
-- Project structure and scaffolding
-- FastAPI backend with upload and moments endpoints
-- Database models (FileMetadata, MomentOfInterest)
-- React frontend with upload, video player, and moment dropdown
-- Celery worker setup
-- Docker Compose configuration
-- Dummy event detection (returns 3 fake moments)
-
-🔄 **To Be Implemented:**
-- Real event detection using trained model
-- Model loading in `detect_events.py`
-- Full feature extraction pipeline
-- Profanity detection in transcripts
-- S3 integration (optional)
-
-## Testing the First Feature
-
-1. Upload a short bodycam clip (mp4)
-2. Backend will process it and return 3 dummy moments
-3. UI will show the dropdown with detected events
-4. Selecting an event will filter and auto-seek the video
-
-## Development Notes
-
-- The current implementation uses **dummy moment detection** for testing
-- To enable real detection, update `services/detect_events.py` to:
-  1. Load the trained model
-  2. Extract features from uploaded files
-  3. Run inference
-  4. Return detected moments
 
 - File uploads are stored in `./uploads` directory
 - Database migrations are handled via SQLAlchemy's `create_all()`
