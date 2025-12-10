@@ -3,6 +3,12 @@
 
 A toolkit for uploading, transcribing, and detecting events in long audio/video files, with a searchable web UI.
 
+## 🎥 Demo Video
+
+[![ALERT Demo](https://img.youtube.com/vi/qM6ZRfXLaUo/maxresdefault.jpg)](https://www.youtube.com/watch?v=qM6ZRfXLaUo)
+
+*Click the thumbnail above to watch the full demo on YouTube.*
+
 ## Architecture
 
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
