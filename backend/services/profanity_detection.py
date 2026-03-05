@@ -25,18 +25,29 @@ def detect_profanity_from_transcript(
     if not transcript_segments:
         return profanity_events
     
-    # Common profanity words to detect
     profanity_patterns = [
-        r'\bf+u+c+k+\w*\b',  # fuck, fucking, fucked, etc.
-        r'\bs+h+i+t+\w*\b',  # shit, shitty, etc.
-        r'\bd+a+m+n+\w*\b',  # damn, damned, etc.
-        r'\ba+s+s+\b',       # ass
-        r'\ba+s+s+h+o+l+e+\b',  # asshole
-        r'\bb+i+t+c+h+\w*\b',  # bitch, bitching, etc.
-        r'\bc+r+a+p+\b',     # crap
-        r'\bh+e+l+l+\b',     # hell
-        r'\bp+i+s+s+\w*\b',  # piss, pissed, etc.
-        r'\bg+o+d+d+a+m+n+\b',  # goddamn
+        r'\bf+u+c+k+\w*\b',
+        r'\bs+h+i+t+\w*\b',
+        r'\bd+a+m+n+\w*\b',
+        r'\ba+s+s+\b',
+        r'\ba+s+s+h+o+l+e+\w*\b',
+        r'\bb+i+t+c+h+\w*\b',
+        r'\bc+r+a+p+\b',
+        r'\bh+e+l+l+\b',
+        r'\bp+i+s+s+\w*\b',
+        r'\bg+o+d+d+a+m+n+\w*\b',
+        r'\bb+u+l+l+s+h+i+t+\w*\b',
+        r'\bm+o+t+h+e+r+f+u+c+k+\w*\b',
+        r'\bw+t+f+\b',
+        r'\bs+o+b\b',
+        r'\bd+i+c+k+\w*\b',
+        r'\bb+a+s+t+a+r+d+\w*\b',
+        r'\bslur\w*\b',
+        r'\bn+i+g+g+\w*\b',
+        r'\bf+a+g+\w*\b',
+        r'\bc+u+n+t+\w*\b',
+        r'\bw+h+o+r+e+\w*\b',
+        r'\bstfu\b',
     ]
     
     print("[PROFANITY DETECTION] Analyzing transcript for profanity...")
@@ -124,10 +135,10 @@ def _create_profanity_event(window: Dict, duration: float) -> Dict:
     
     # Calculate confidence based on density
     if count == 1:
-        confidence = 0.70
+        confidence = 0.60
         intensity = "isolated"
     elif count <= 3:
-        confidence = 0.80
+        confidence = 0.75
         intensity = "moderate"
     else:
         confidence = min(0.95, 0.85 + (count - 4) * 0.02)
