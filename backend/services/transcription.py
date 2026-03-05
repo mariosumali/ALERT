@@ -6,6 +6,7 @@ import os
 import time
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
@@ -493,6 +494,130 @@ def _split_audio_into_chunks(audio_path: str, chunk_duration: int = 60, overlap:
     return chunks
 
 
+def _transcribe_single_chunk(
+    client,
+    chunk_path: str,
+    chunk_start: float,
+    chunk_end: float,
+    chunk_idx: int,
+    total_chunks: int,
+    model_name: str,
+    max_attempts: int,
+    actual_duration: float,
+) -> Tuple[List[Dict], str]:
+    """Transcribe a single audio chunk with retries and format fallback. Thread-safe."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"Transcribing chunk {chunk_idx + 1}/{total_chunks} ({chunk_start:.1f}s - {chunk_end:.1f}s)...")
+            with open(chunk_path, "rb") as audio_file:
+                use_verbose_json = False
+                format_used = None
+
+                try:
+                    response = client.audio.transcriptions.create(
+                        model=model_name,
+                        file=audio_file,
+                        response_format="srt",
+                        temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                    )
+                    format_used = "srt"
+                except Exception as e:
+                    if "srt" in str(e).lower() or "unsupported" in str(e).lower():
+                        try:
+                            audio_file.seek(0)
+                            response = client.audio.transcriptions.create(
+                                model=model_name,
+                                file=audio_file,
+                                response_format="verbose_json",
+                                temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                            )
+                            use_verbose_json = True
+                            format_used = "verbose_json"
+                        except Exception as e2:
+                            if "verbose_json" in str(e2).lower() or "unsupported" in str(e2).lower():
+                                audio_file.seek(0)
+                                response = client.audio.transcriptions.create(
+                                    model=model_name,
+                                    file=audio_file,
+                                    response_format="json",
+                                    temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
+                                )
+                                format_used = "json (aligned)"
+                            else:
+                                raise
+                    else:
+                        raise
+
+            # Parse response based on format
+            if format_used == "srt":
+                srt_content = response if isinstance(response, str) else str(response)
+                segments, transcript_text = _parse_srt(srt_content, chunk_start)
+            elif use_verbose_json:
+                if hasattr(response, "model_dump"):
+                    response_dict = response.model_dump()
+                elif hasattr(response, "to_dict"):
+                    response_dict = response.to_dict()
+                elif isinstance(response, dict):
+                    response_dict = response
+                else:
+                    response_dict = getattr(response, "__dict__", {})
+
+                transcript_text = response_dict.get("text", "").strip()
+                raw_segments = response_dict.get("segments", [])
+
+                segments = []
+                for segment in raw_segments:
+                    if hasattr(segment, "model_dump"):
+                        segment = segment.model_dump()
+                    elif hasattr(segment, "to_dict"):
+                        segment = segment.to_dict()
+
+                    seg_start = float(segment.get("start", 0.0)) + chunk_start
+                    seg_end = float(segment.get("end", 0.0)) + chunk_start
+
+                    if seg_start >= 0 and seg_end > seg_start:
+                        segments.append({
+                            "start": round(seg_start, 2),
+                            "end": round(seg_end, 2),
+                            "text": str(segment.get("text", "")).strip(),
+                        })
+            else:
+                if hasattr(response, "model_dump"):
+                    response_dict = response.model_dump()
+                elif hasattr(response, "to_dict"):
+                    response_dict = response.to_dict()
+                elif isinstance(response, dict):
+                    response_dict = response
+                else:
+                    response_dict = getattr(response, "__dict__", {})
+
+                transcript_text = response_dict.get("text", "").strip()
+                segments = _align_transcript_with_audio(
+                    chunk_path, transcript_text, chunk_start,
+                    actual_duration if actual_duration > 0 else 0.0,
+                )
+
+            print(f"✓ Chunk {chunk_idx + 1}/{total_chunks} complete: {len(segments)} segments")
+            if segments:
+                print(f"  First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s: {segments[0]['text'][:50]}...")
+            return segments, transcript_text
+
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            error_message = str(exc)
+
+            if status_code == 429 or "429" in error_message or "rate" in error_message.lower():
+                if attempt < max_attempts:
+                    delay = 2 ** (attempt - 1)
+                    print(f"Chunk {chunk_idx + 1} rate limit (attempt {attempt}). Retrying in {delay}s...")
+                    time.sleep(delay)
+                    continue
+
+            raise RuntimeError(f"Chunk {chunk_idx + 1} failed after {attempt} attempt(s): {error_message}")
+
+    raise RuntimeError(f"Chunk {chunk_idx + 1} exhausted all {max_attempts} attempts")
+
+
 def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
     client = _get_openai_client()
     # Use whisper-1 which supports SRT format, or fallback to configured model
@@ -542,153 +667,42 @@ def _transcribe_with_openai(file_path: str) -> Tuple[str, List[Dict]]:
         successful_chunks = 0
         failed_chunks = 0
         
-        for chunk_idx, (chunk_path, chunk_start, chunk_end) in enumerate(chunks):
-            chunk_files.append(chunk_path)  # Track for cleanup
-            
-            for attempt in range(1, max_attempts + 1):
+        # Track all chunk paths for cleanup
+        for chunk_path, _, _ in chunks:
+            chunk_files.append(chunk_path)
+        
+        total_chunks = len(chunks)
+        max_workers = min(4, total_chunks)
+        
+        # Transcribe chunks in parallel
+        chunk_results: Dict[int, Tuple[List[Dict], str]] = {}
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    _transcribe_single_chunk,
+                    client, cp, cs, ce, idx, total_chunks,
+                    model_name, max_attempts, actual_duration,
+                ): idx
+                for idx, (cp, cs, ce) in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
                 try:
-                    print(f"Transcribing chunk {chunk_idx + 1}/{len(chunks)} ({chunk_start:.1f}s - {chunk_end:.1f}s)...")
-                    with open(chunk_path, "rb") as audio_file:
-                        # Try SRT first (best format with timestamps), then verbose_json, then json
-                        use_verbose_json = False
-                        format_used = None
-                        
-                        try:
-                            # Try SRT format first - provides timestamps in subtitle format
-                            response = client.audio.transcriptions.create(
-                                model=model_name,
-                                file=audio_file,
-                                response_format="srt",
-                                temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
-                            )
-                            format_used = "srt"
-                        except Exception as e:
-                            # If SRT fails, try verbose_json
-                            if "srt" in str(e).lower() or "unsupported" in str(e).lower():
-                                print(f"SRT format not supported by {model_name}, trying verbose_json...")
-                                try:
-                                    audio_file.seek(0)  # Reset file pointer
-                                    response = client.audio.transcriptions.create(
-                                        model=model_name,
-                                        file=audio_file,
-                                        response_format="verbose_json",
-                                        temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
-                                    )
-                                    use_verbose_json = True
-                                    format_used = "verbose_json"
-                                except Exception as e2:
-                                    # If verbose_json also fails, fall back to json
-                                    if "verbose_json" in str(e2).lower() or "unsupported" in str(e2).lower():
-                                        print(f"verbose_json not supported, trying json format...")
-                                        audio_file.seek(0)  # Reset file pointer
-                                        response = client.audio.transcriptions.create(
-                                            model=model_name,
-                                            file=audio_file,
-                                            response_format="json",
-                                            temperature=float(os.getenv("OPENAI_TRANSCRIPTION_TEMPERATURE", "0")),
-                                        )
-                                        format_used = "json (aligned)"
-                                    else:
-                                        raise
-                            else:
-                                raise
-                    
-                    # Parse response based on format
-                    if format_used == "srt":
-                        # Parse SRT format to extract timestamps and text
-                        srt_content = response if isinstance(response, str) else str(response)
-                        segments, transcript_text = _parse_srt(srt_content, chunk_start)
-                    elif use_verbose_json:
-                        # Parse verbose_json format which includes segments with timestamps
-                        if hasattr(response, "model_dump"):
-                            response_dict = response.model_dump()
-                        elif hasattr(response, "to_dict"):
-                            response_dict = response.to_dict()
-                        elif isinstance(response, dict):
-                            response_dict = response
-                        else:
-                            response_dict = getattr(response, "__dict__", {})
-                        
-                        transcript_text = response_dict.get("text", "").strip()
-                        raw_segments = response_dict.get("segments", [])
-                        
-                        # Convert segments to our format with chunk offset
-                        segments = []
-                        for segment in raw_segments:
-                            if hasattr(segment, "model_dump"):
-                                segment = segment.model_dump()
-                            elif hasattr(segment, "to_dict"):
-                                segment = segment.to_dict()
-                            
-                            segment_start = float(segment.get("start", 0.0)) + chunk_start
-                            segment_end = float(segment.get("end", 0.0)) + chunk_start
-                            
-                            # Ensure we have valid timestamps
-                            if segment_start >= 0 and segment_end > segment_start:
-                                segments.append({
-                                    "start": round(segment_start, 2),
-                                    "end": round(segment_end, 2),
-                                    "text": str(segment.get("text", "")).strip(),
-                                })
-                            else:
-                                print(f"  Warning: Invalid timestamps in segment: start={segment_start}, end={segment_end}")
-                    else:
-                        # JSON format - no timestamps, need to use audio analysis
-                        if hasattr(response, "model_dump"):
-                            response_dict = response.model_dump()
-                        elif hasattr(response, "to_dict"):
-                            response_dict = response.to_dict()
-                        elif isinstance(response, dict):
-                            response_dict = response
-                        else:
-                            response_dict = getattr(response, "__dict__", {})
-                        
-                        transcript_text = response_dict.get("text", "").strip()
-                        # Use audio analysis to detect when speech occurs
-                        # Pass actual_duration to cap segments
-                        segments = _align_transcript_with_audio(chunk_path, transcript_text, chunk_start, actual_duration if actual_duration > 0 else 0.0)
-                    
-                    # Log transcript length for debugging
-                    if transcript_text:
-                        print(f"Chunk {chunk_idx + 1}: Received {len(transcript_text)} characters, {len(transcript_text.split())} words")
-                        format_type = format_used or ("verbose_json" if use_verbose_json else "json (with audio alignment)")
-                        print(f"Chunk {chunk_idx + 1}: Parsed {len(segments)} segments from {format_type} format")
-                        if segments:
-                            print(f"Chunk {chunk_idx + 1}: First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s")
-                            if len(segments) > 1:
-                                print(f"Chunk {chunk_idx + 1}: Last segment: {segments[-1]['start']:.1f}s - {segments[-1]['end']:.1f}s")
-
-                    # Add chunk results to combined results
-                    all_segments.extend(segments)
-                    if transcript_text:
-                        full_text_parts.append(transcript_text)
-                    
-                    print(f"✓ Chunk {chunk_idx + 1}/{len(chunks)} complete: {len(segments)} segments")
-                    if segments:
-                        print(f"  First segment: {segments[0]['start']:.1f}s - {segments[0]['end']:.1f}s: {segments[0]['text'][:50]}...")
-                        if len(segments) > 1:
-                            print(f"  Last segment: {segments[-1]['start']:.1f}s - {segments[-1]['end']:.1f}s: {segments[-1]['text'][:50]}...")
+                    segments, text = future.result()
+                    chunk_results[idx] = (segments, text)
                     successful_chunks += 1
-                    break  # Success, move to next chunk
-                    
                 except Exception as exc:
-                    status_code = getattr(exc, "status_code", None)
-                    error_message = str(exc)
-
-                    # Retry automatically on rate limits
-                    if status_code == 429 or "429" in error_message or "rate" in error_message.lower():
-                        if attempt < max_attempts:
-                            delay = 2 ** (attempt - 1)
-                            print(f"Chunk {chunk_idx + 1} rate limit (attempt {attempt}). Retrying in {delay}s...")
-                            time.sleep(delay)
-                            continue
-                        print(f"⚠ Chunk {chunk_idx + 1} failed after {max_attempts} retries: {error_message}")
-                        failed_chunks += 1
-                        break  # Skip this chunk and continue with others
-                    
-                    print(f"⚠ Chunk {chunk_idx + 1} failed: {error_message}")
+                    print(f"⚠ Chunk {idx + 1} failed: {exc}")
                     failed_chunks += 1
-                    break  # Skip this chunk and continue with others
+        
+        # Reassemble in order
+        for idx in range(total_chunks):
+            if idx in chunk_results:
+                segments, text = chunk_results[idx]
+                all_segments.extend(segments)
+                if text:
+                    full_text_parts.append(text)
         
         # Combine all results
         transcript_text = " ".join(full_text_parts)
