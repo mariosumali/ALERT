@@ -90,7 +90,8 @@ async def get_file_metadata(file_id: str):
             "original_filename": file_record.original_filename,
             "ocr_metadata": file_record.ocr_metadata,
             "duration": file_record.duration,
-            "timestamp_start": file_record.timestamp_start
+            "timestamp_start": file_record.timestamp_start,
+            "status": file_record.status
         }
     finally:
         db.close()
