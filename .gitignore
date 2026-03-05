@@ -42,6 +42,12 @@ uploads/
 *.mov
 *.mkv
 
+# Generated data
+backend/moments/
+backend/ocr_data/
+backend/transcripts/
+test_upload.html
+
 # Database
 *.db
 *.sqlite
