@@ -1,6 +1,6 @@
 # ALERT — Audio-Visual Log Event Recognition Toolkit
 
-**Created by Mario Sumali & Shane Mion**
+**Created by Mario Sumali**
 
 A three-panel investigative workspace for analyzing body camera and dash cam footage. Upload video, get automated transcription, audio event detection, and AI-powered analysis — all in one view.
 
@@ -14,16 +14,12 @@ A three-panel investigative workspace for analyzing body camera and dash cam foo
 
 ## Features
 
-- **Resizable 3-panel layout** — Events sidebar, video + transcript center, AI assistant on the right. Drag to resize.
-- **Automated transcription** — Speech-to-text via OpenAI Whisper, synced to playback with click-to-seek.
-- **Audio event detection** — Gunshots, profanity, frequency anomalies, loud sounds, compliance issues, and more flagged automatically with confidence scores.
-- **OCR metadata extraction** — Camera model, device ID, badge number, and recording timestamp pulled from video frames.
-- **AI Assist** — Ask questions about the footage or generate structured reports (incident summary, timeline, use-of-force analysis). Timestamp citations are clickable.
-- **Mini timeline** — Scrubber bar with color-coded event markers. Click any marker to jump to that moment.
-- **Playback controls** — Speed adjustment (0.5x–2x), skip ±5s, jump between events, keyboard shortcuts (J/K/L/Q/E).
-- **Search & filter** — Search events and transcript text, filter by event category.
-- **Light & dark mode** — Toggle via the header button, respects OS preference.
-- **Responsive** — Full 3-pane layout on desktop, tabbed navigation on mobile/tablet.
+- **Automated transcription** — Speech-to-text synced to video playback.
+- **Audio event detection** — Gunshots, profanity, anomalies, and more flagged with confidence scores.
+- **AI-powered analysis** — Ask questions, generate incident reports, and get contextual summaries.
+- **Interactive timeline** — Color-coded event markers with click-to-seek navigation.
+- **Searchable & filterable** — Full-text search across events and transcript.
+- **Responsive UI** — Resizable 3-panel layout with light and dark mode.
 
 ## Architecture
 
