@@ -1,9 +1,10 @@
 from celery import Celery
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from models.database import SessionLocal, init_db
-from models.schema import FileMetadata, MomentOfInterest
+from models.schema import FileMetadata, MomentOfInterest, VideoSegmentMetadata
 from services.transcription import transcribe_file_with_timestamps
 from services.audio_anomaly_detection import extract_raw_audio_from_video, analyze_audio_anomalies
+from services.gemini_client import is_gemini_enabled
 from utils.helpers import get_media_duration, format_duration
 import os
 import shutil
@@ -276,6 +277,95 @@ def _run_audio_extract(file_path, file_type):
     return file_path, temp_audio_dir
 
 
+def _run_gemini_video_analysis(file_path, file_type):
+    """Run Gemini multimodal analysis on video chunks."""
+    if file_type != "video" or not is_gemini_enabled():
+        return []
+    from services.segment_analysis import analyze_video_segments
+    chunk_seconds = int(os.getenv("VIDEO_CHUNK_SECONDS", "300"))
+    return analyze_video_segments(file_path, chunk_seconds=chunk_seconds)
+
+
+def _store_segment_metadata(db, file_id, segments):
+    """Store Gemini segment analysis results in the database."""
+    count = 0
+    for seg in segments:
+        if seg.get("error"):
+            continue
+        try:
+            row = VideoSegmentMetadata(
+                file_id=file_id,
+                segment_idx=seg.get("segment_idx", 0),
+                start_sec=seg.get("start_sec", 0.0),
+                end_sec=seg.get("end_sec", 0.0),
+                scene_type=seg.get("scene_type"),
+                time_of_day=seg.get("time_of_day"),
+                lighting=seg.get("lighting"),
+                weather=seg.get("weather"),
+                camera_motion=seg.get("camera_motion"),
+                camera_obfuscation_present=seg.get("camera_obfuscation_present", False),
+                officers_count=seg.get("officers_count", 0),
+                civilians_count=seg.get("civilians_count", 0),
+                use_of_force_present=seg.get("use_of_force_present", False),
+                use_of_force_types=seg.get("use_of_force_types", []),
+                potential_excessive_force=seg.get("potential_excessive_force", False),
+                key_moments_summary=seg.get("key_moments_summary"),
+                summary=seg.get("summary"),
+                raw_metadata=seg,
+            )
+            db.add(row)
+            count += 1
+        except Exception as e:
+            print(f"[SEGMENTS] Failed to store segment {seg.get('segment_idx')}: {e}")
+    return count
+
+
+def _moments_from_gemini_segments(segments):
+    """Extract MomentOfInterest events from Gemini segment analysis."""
+    events = []
+    for seg in segments:
+        if seg.get("error"):
+            continue
+
+        start = seg.get("start_sec", 0.0)
+        end = seg.get("end_sec", 0.0)
+
+        if seg.get("use_of_force_present"):
+            force_types = seg.get("use_of_force_types", [])
+            events.append({
+                "start_time": start,
+                "end_time": end,
+                "event_types": ["UseOfForce"] + [f"Force:{t}" for t in force_types],
+                "confidence": 0.85,
+                "description": seg.get("use_of_force_description", "Use of force detected via video analysis"),
+                "category": "UseOfForce",
+            })
+
+        if seg.get("potential_excessive_force"):
+            events.append({
+                "start_time": start,
+                "end_time": end,
+                "event_types": ["PotentialExcessiveForce"],
+                "confidence": 0.75,
+                "description": seg.get("excessive_force_description", "Potential excessive force detected via video analysis"),
+                "category": "PotentialExcessiveForce",
+            })
+
+        if seg.get("camera_obfuscation_present"):
+            spans = seg.get("camera_obfuscation_spans", [])
+            for span in spans:
+                events.append({
+                    "start_time": span.get("start_sec", start),
+                    "end_time": span.get("end_sec", end),
+                    "event_types": ["CameraObfuscation"],
+                    "confidence": 0.8,
+                    "description": f"Camera obfuscation: {span.get('type', 'unknown')}",
+                    "category": "CameraObfuscation",
+                })
+
+    return events
+
+
 def _store_events(db, file_id, events, event_type_label, min_confidence=0.6):
     """Store a list of detection events as MomentOfInterest rows. Returns count stored."""
     count = 0
@@ -457,12 +547,32 @@ def transcribe_and_detect_task(file_id: str, file_path: str):
               f"{len(gunshot_events)} gunshots, {len(profanity_events)} profanity, "
               f"{len(gpt_events)} GPT events")
 
+        # ── Phase 3: Gemini multimodal video analysis ─────────────────────
+        gemini_segments = []
+        gemini_events = []
+        if file_metadata.file_type == "video" and is_gemini_enabled():
+            file_metadata.status = "processing_video_analysis"
+            db.commit()
+            try:
+                gemini_segments = _run_gemini_video_analysis(file_path, file_metadata.file_type)
+                if gemini_segments:
+                    seg_count = _store_segment_metadata(db, file_id, gemini_segments)
+                    db.commit()
+                    print(f"[PHASE 3] Stored {seg_count} segment metadata rows")
+
+                    gemini_events = _moments_from_gemini_segments(gemini_segments)
+                    print(f"[PHASE 3] Extracted {len(gemini_events)} events from video analysis")
+            except Exception as e:
+                print(f"[PHASE 3] Gemini analysis failed: {e}")
+                traceback.print_exc()
+
         # ── Store all detected moments ────────────────────────────────────
         total_stored = 0
         total_stored += _store_events(db, file_id, audio_anomalies, "AudioAnomaly", min_confidence=0.6)
         total_stored += _store_events(db, file_id, gunshot_events, "Gunshot", min_confidence=0.6)
         total_stored += _store_events(db, file_id, profanity_events, "Profanity", min_confidence=0.6)
         total_stored += _store_events(db, file_id, gpt_events, "Event", min_confidence=0.5)
+        total_stored += _store_events(db, file_id, gemini_events, "VideoAnalysis", min_confidence=0.5)
 
         if total_stored > 0:
             db.commit()
