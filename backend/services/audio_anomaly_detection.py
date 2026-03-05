@@ -154,10 +154,9 @@ def analyze_audio_anomalies(audio_path: str) -> List[Dict]:
         # Sort by start time
         anomalies.sort(key=lambda x: x['start_time'])
         
-        # Filter to only include anomalies with confidence >= 0.8
-        high_confidence_anomalies = [a for a in anomalies if a.get('confidence', 0.0) >= 0.8]
+        high_confidence_anomalies = [a for a in anomalies if a.get('confidence', 0.0) >= 0.6]
         
-        print(f"[AUDIO ANALYSIS] ✓ Total anomalies detected: {len(anomalies)} (high confidence >= 0.8: {len(high_confidence_anomalies)})")
+        print(f"[AUDIO ANALYSIS] ✓ Total anomalies detected: {len(anomalies)} (confidence >= 0.6: {len(high_confidence_anomalies)})")
         
         return high_confidence_anomalies
         
@@ -180,8 +179,7 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     if len(rms) == 0 or rms_max <= 0:
         return anomalies
     
-    # Less strict threshold: 4.5 std above mean, or top 1% of energy values
-    threshold_statistical = rms_mean + 4.5 * rms_std
+    threshold_statistical = rms_mean + 3.5 * rms_std
     
     # Use percentile-based threshold as primary method (top 1%)
     percentile_99 = np.percentile(rms, 99) if len(rms) > 0 else rms_max * 0.99
@@ -204,7 +202,7 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
     in_loud_period = False
     loud_start = None
     
-    print(f"[LOUD SOUND] Relaxed thresholds (4.5std): statistical={threshold_statistical:.4f}, percentile_99={percentile_99:.4f}, final={threshold:.4f}, mean={rms_mean:.4f}")
+    print(f"[LOUD SOUND] Thresholds (3.5std): statistical={threshold_statistical:.4f}, percentile_99={percentile_99:.4f}, final={threshold:.4f}, mean={rms_mean:.4f}")
     
     for i, (time, energy) in enumerate(zip(rms_times, rms)):
         # Must exceed threshold AND be significantly louder than local context
@@ -229,14 +227,12 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
                     mean_ratio = peak_energy / (rms_mean + 0.001)
                     context_ratio = peak_energy / (local_avg + 0.001)
                     
-                    # Relaxed criteria: top 10% of max (0.90), 2.5x mean, 2.0x context
-                    if intensity_ratio > 0.90 and mean_ratio > 2.5 and context_ratio > 2.0:
+                    if intensity_ratio > 0.70 and mean_ratio > 2.0 and context_ratio > 1.5:
                         category = "LoudSound"
                         description = f"Loud sound detected. Duration: {loud_duration:.2f}s, {mean_ratio:.1f}x mean"
-                        confidence = min(0.95, 0.75 + min(intensity_ratio - 0.90, 0.1) * 10)
+                        confidence = min(0.95, 0.65 + min(intensity_ratio - 0.70, 0.25) * 1.2)
                         
-                        # Only include if confidence >= 0.90
-                        if confidence >= 0.90:
+                        if confidence >= 0.60:
                             anomalies.append({
                                 "start_time": max(0.0, loud_start - 0.2),
                                 "end_time": min(duration, time + 0.2),
@@ -257,10 +253,9 @@ def detect_loud_sounds(rms: np.ndarray, rms_times: np.ndarray, rms_mean: float,
             intensity_ratio = peak_energy / rms_max
             mean_ratio = peak_energy / (rms_mean + 0.001)
             
-            if intensity_ratio > 0.90 and mean_ratio > 2.5:
-                confidence = min(0.95, 0.75 + min(intensity_ratio - 0.90, 0.1) * 10)
-                # Only include if confidence >= 0.90
-                if confidence >= 0.90:
+            if intensity_ratio > 0.70 and mean_ratio > 2.0:
+                confidence = min(0.95, 0.65 + min(intensity_ratio - 0.70, 0.25) * 1.2)
+                if confidence >= 0.60:
                     anomalies.append({
                         "start_time": max(0.0, loud_start - 0.2),
                         "end_time": duration,
@@ -304,21 +299,18 @@ def detect_sudden_changes(rms: np.ndarray, rms_times: np.ndarray,
             time = rms_times[i]
             change_ratio = abs_change / (rms_mean + 0.001)  # Avoid division by zero
             
-            # Require EXTREME change: at least 3x the mean energy in a single step
-            if change_ratio > 3.0:
+            if change_ratio > 2.0:
                 category = "SuddenChange"
                 direction = "increase" if change > 0 else "decrease"
-                # Higher confidence for larger changes
-                confidence = min(0.9, 0.7 + min((change_ratio - 3.0) / 2.0, 0.2))
+                confidence = min(0.9, 0.6 + min((change_ratio - 2.0) / 3.0, 0.3))
                 
-                # Only include if confidence >= 0.8
-                if confidence >= 0.8:
+                if confidence >= 0.6:
                     anomalies.append({
                         "start_time": max(0.0, time - 0.3),
                         "end_time": min(duration, time + 0.3),
                         "category": category,
                         "confidence": confidence,
-                        "description": f"EXTREME sudden energy {direction} ({change_ratio:.1f}x mean, {abs_change:.4f})",
+                        "description": f"Sudden energy {direction} ({change_ratio:.1f}x mean, {abs_change:.4f})",
                         "intensity": float(change_ratio)
                     })
     
@@ -334,12 +326,9 @@ def detect_silence_anomalies(rms: np.ndarray, rms_times: np.ndarray,
     """
     anomalies = []
     
-    # MUCH STRICTER silence threshold: 5% of mean or absolute 0.005
-    # This ensures only EXTREMELY quiet periods are detected
-    silence_threshold = max(0.005, rms_mean * 0.05)
+    silence_threshold = max(0.005, rms_mean * 0.08)
     
-    # Require longer silence periods: at least 5 seconds
-    min_silence_duration = 5.0
+    min_silence_duration = 2.0
     
     # Also check that silence is significantly quieter than surrounding context
     window_size = max(10, int(3.0 / (rms_times[1] - rms_times[0])) if len(rms_times) > 1 else 10)
@@ -353,8 +342,7 @@ def detect_silence_anomalies(rms: np.ndarray, rms_times: np.ndarray,
     for i, (time, energy) in enumerate(zip(rms_times, rms)):
         local_avg = rolling_avg[i] if i < len(rolling_avg) else rms_mean
         
-        # Must be below threshold AND at least 5x quieter than local context
-        if energy < silence_threshold and energy < local_avg * 0.2:
+        if energy < silence_threshold and energy < local_avg * 0.3:
             if not in_silence:
                 silence_start = time
                 in_silence = True
@@ -367,12 +355,10 @@ def detect_silence_anomalies(rms: np.ndarray, rms_times: np.ndarray,
                     start_idx = max(0, i - int(silence_duration / time_diff))
                     avg_silence_energy = np.mean(rms[start_idx:i]) if start_idx < i else energy
                     
-                    # Must be at least 10x quieter than mean
                     quiet_ratio = rms_mean / (avg_silence_energy + 0.001)
-                    if quiet_ratio > 10.0:
-                        confidence = min(0.9, 0.7 + min((quiet_ratio - 10.0) / 20.0, 0.2))
-                        # Only include if confidence >= 0.8
-                        if confidence >= 0.8:
+                    if quiet_ratio > 5.0:
+                        confidence = min(0.9, 0.6 + min((quiet_ratio - 5.0) / 15.0, 0.3))
+                        if confidence >= 0.6:
                             anomalies.append({
                                 "start_time": max(0.0, silence_start - 0.5),
                                 "end_time": min(duration, time + 0.5),
@@ -392,16 +378,15 @@ def detect_silence_anomalies(rms: np.ndarray, rms_times: np.ndarray,
             avg_silence_energy = np.mean(rms[-int(silence_duration / time_diff):]) if len(rms) > 0 else rms[-1]
             quiet_ratio = rms_mean / (avg_silence_energy + 0.001)
             
-            if quiet_ratio > 10.0:
-                confidence = min(0.9, 0.7 + min((quiet_ratio - 10.0) / 20.0, 0.2))
-                # Only include if confidence >= 0.8
-                if confidence >= 0.8:
+            if quiet_ratio > 5.0:
+                confidence = min(0.9, 0.6 + min((quiet_ratio - 5.0) / 15.0, 0.3))
+                if confidence >= 0.6:
                     anomalies.append({
                         "start_time": max(0.0, silence_start - 0.5),
                         "end_time": duration,
                         "category": "Silence",
                         "confidence": confidence,
-                        "description": f"EXTREME silence at end ({silence_duration:.1f}s, {quiet_ratio:.1f}x quieter)",
+                        "description": f"Silence at end ({silence_duration:.1f}s, {quiet_ratio:.1f}x quieter)",
                         "intensity": float(quiet_ratio / 20.0)
                     })
     
@@ -416,8 +401,7 @@ def detect_distortion(y: np.ndarray, rms_times: np.ndarray, sr: int, duration: f
     """
     anomalies = []
     
-    # MUCH STRICTER clipping threshold: 99% of max value (near-maximum clipping)
-    clip_threshold = 0.99
+    clip_threshold = 0.95
     max_amplitude = np.max(np.abs(y))
     
     if max_amplitude == 0:
@@ -457,11 +441,9 @@ def detect_distortion(y: np.ndarray, rms_times: np.ndarray, sr: int, duration: f
                 end_sample = librosa.time_to_samples(end_time, sr=sr)
                 clip_percentage = len(clipping_samples[(clipping_samples >= start_sample) & (clipping_samples <= end_sample)]) / max(1, end_sample - start_sample)
                 
-                # Only mark if >50% of samples in this period are clipping
-                if clip_percentage > 0.5:
-                    confidence = min(0.95, 0.8 + min(duration_clip * 1.0, 0.15))
-                    # Only include if confidence >= 0.8
-                    if confidence >= 0.8:
+                if clip_percentage > 0.3:
+                    confidence = min(0.95, 0.65 + min(duration_clip * 1.0, 0.3))
+                    if confidence >= 0.6:
                         anomalies.append({
                             "start_time": max(0.0, start_time - 0.1),
                             "end_time": min(duration, end_time + 0.1),
@@ -496,11 +478,10 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
     zcr_mean = np.mean(zero_crossing_rate)
     zcr_std = np.std(zero_crossing_rate)
     
-    # MUCH STRICTER thresholds: 3.5 std deviations (instead of 2)
-    centroid_high_threshold = centroid_mean + 3.5 * centroid_std
-    centroid_low_threshold = centroid_mean - 3.5 * centroid_std
-    rolloff_threshold = rolloff_mean + 3.5 * rolloff_std
-    zcr_threshold = zcr_mean + 3.5 * zcr_std
+    centroid_high_threshold = centroid_mean + 2.5 * centroid_std
+    centroid_low_threshold = centroid_mean - 2.5 * centroid_std
+    rolloff_threshold = rolloff_mean + 2.5 * rolloff_std
+    zcr_threshold = zcr_mean + 2.5 * zcr_std
     
     print(f"[FREQUENCY] Strict thresholds: centroid={centroid_low_threshold:.1f}-{centroid_high_threshold:.1f}, rolloff>{rolloff_threshold:.1f}, zcr>{zcr_threshold:.4f}")
     
@@ -574,10 +555,9 @@ def detect_frequency_anomalies(spectral_centroids: np.ndarray, spectral_rolloff:
         duration_anomaly = group['end_time'] - group['start_time']
         if duration_anomaly > 0.1:  # At least 100ms
             unique_descriptions = list(set(group['descriptions']))[:3]  # Limit to 3 unique
-            confidence = min(0.9, 0.75 + min(group['score'] * 0.05, 0.15))
+            confidence = min(0.9, 0.6 + min(group['score'] * 0.1, 0.3))
             
-            # Only include if confidence >= 0.8
-            if confidence >= 0.8:
+            if confidence >= 0.6:
                 # Determine if this should also be tagged as LoudSound
                 # Criteria: (score >= 3 OR max_deviation >= 4.0) AND confidence >= 0.90
                 is_loud = (group['score'] >= 3 or group['max_deviation'] >= 4.0) and confidence >= 0.90
