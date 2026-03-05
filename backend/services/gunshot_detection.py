@@ -97,9 +97,9 @@ def detect_gunshots_from_transcript(
         
         # Thresholds for frequency anomalies (gunshots often have distinctive frequency signatures)
         # Gunshots typically have sharp transients with high frequency content
-        centroid_high_threshold = centroid_mean + 2.5 * centroid_std
-        rolloff_threshold = rolloff_mean + 2.5 * rolloff_std
-        zcr_threshold = zcr_mean + 2.5 * zcr_std
+        centroid_high_threshold = centroid_mean + 2.0 * centroid_std
+        rolloff_threshold = rolloff_mean + 2.0 * rolloff_std
+        zcr_threshold = zcr_mean + 2.0 * zcr_std
         
         print(f"[GUNSHOT DETECTION] Analyzing {len(shot_mentions)} mentions for frequency anomalies...")
         
@@ -163,10 +163,9 @@ def detect_gunshots_from_transcript(
                 
                 # Confidence based on anomaly score and proximity to mention
                 proximity_factor = 1.0 / (1.0 + abs(best_time - mention_time))
-                confidence = min(0.95, 0.75 + (best_score - 1) * 0.1 + proximity_factor * 0.1)
+                confidence = min(0.95, 0.65 + (best_score - 1) * 0.1 + proximity_factor * 0.15)
                 
-                # Only include if confidence >= 0.7 (relaxed from 0.8)
-                if confidence >= 0.7:
+                if confidence >= 0.6:
                     gunshot_events.append({
                         'start_time': gunshot_start,
                         'end_time': gunshot_end,
@@ -188,7 +187,7 @@ def detect_gunshots_from_transcript(
                     'start_time': gunshot_start,
                     'end_time': gunshot_end,
                     'category': 'Gunshot',
-                    'confidence': 0.75,  # Increased base confidence for explicit mentions
+                    'confidence': 0.65,
                     'description': f"Gunshot mentioned at {mention_time:.1f}s (transcript match)",
                     'intensity': 0.5
                 })
