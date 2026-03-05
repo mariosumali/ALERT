@@ -1,15 +1,29 @@
-import { useEffect, useRef, useState } from 'react'
-import UploadForm from './components/UploadForm'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { Panel, Group, Separator } from 'react-resizable-panels'
+import { useVideo } from './contexts/VideoContext'
+import CaseHeader from './components/CaseHeader'
+import ProcessingPipeline from './components/ProcessingPipeline'
 import VideoPlayer from './components/VideoPlayer'
-import MomentDropdown from './components/MomentDropdown'
-import TranscriptionView from './components/TranscriptionView'
-import ChatBot from './components/ChatBot'
-import BodyCamInfo from './components/BodyCamInfo'
-import { transcribeFile, downloadTranscript } from './utils/api'
-import StatusBanner, { StatusBannerVariant } from './components/StatusBanner'
-import type { TranscriptionStatusPayload, TranscriptionStatusState } from './types/transcription'
+import EventPanel from './components/EventPanel'
+import TranscriptPanel from './components/TranscriptPanel'
+import AIAssistant from './components/AIAssistant'
+import type { DetectedEvent, CaseMetadata, ProcessingStatus } from './types/events'
+import { eventFromMoment } from './types/events'
 
-export interface Moment {
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(query).matches : false
+  )
+  useEffect(() => {
+    const mql = window.matchMedia(query)
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [query])
+  return matches
+}
+
+interface RawMoment {
   moment_id: string
   file_id: string
   start_time: number
@@ -19,323 +33,276 @@ export interface Moment {
   description: string
 }
 
-type BannerState = {
-  variant: StatusBannerVariant
-  title: string
-  message?: string
-}
-
 function App() {
+  const { currentTime, seekTo } = useVideo()
   const [fileId, setFileId] = useState<string | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
-  const [moments, setMoments] = useState<Moment[]>([])
-  const [transcribing, setTranscribing] = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const [statusBanner, setStatusBanner] = useState<BannerState | null>(null)
-  const [fileMetadata, setFileMetadata] = useState<any>(null)
-  const [loadingMetadata, setLoadingMetadata] = useState(false)
+  const [events, setEvents] = useState<DetectedEvent[]>([])
+  const [caseInfo, setCaseInfo] = useState<CaseMetadata | null>(null)
+  const [processingStatus, setProcessingStatus] = useState<ProcessingStatus | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
 
-  const momentsPollRef = useRef<number | null>(null)
-  const lastTranscriptionState = useRef<TranscriptionStatusState | null>(null)
+  const pollRef = useRef<number | null>(null)
 
-  const handleUploadSuccess = (newFileId: string, fileUrl: string) => {
-    if (momentsPollRef.current) {
-      clearInterval(momentsPollRef.current)
-      momentsPollRef.current = null
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
     }
+  }, [])
 
+  const fetchMoments = useCallback(async (fid: string) => {
+    try {
+      const res = await fetch(`/api/moments?file_id=${fid}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const moments: RawMoment[] = data.moments || []
+      setEvents(moments.map(eventFromMoment))
+    } catch { /* noop */ }
+  }, [])
+
+  const fetchMetadata = useCallback(async (fid: string): Promise<ProcessingStatus | null> => {
+    try {
+      const res = await fetch(`/api/files/${fid}/metadata`)
+      if (!res.ok) return null
+      const data = await res.json()
+      const status: ProcessingStatus = data.status || null
+      setProcessingStatus(status)
+      setCaseInfo({
+        fileId: fid,
+        filename: data.original_filename || 'Unknown file',
+        deviceId: data.ocr_metadata?.device_id ?? null,
+        deviceModel: data.ocr_metadata?.device_model ?? null,
+        badgeNumber: data.ocr_metadata?.badge_number ?? null,
+        officerId: data.ocr_metadata?.officer_id ?? null,
+        recordedAt: data.ocr_metadata?.timestamp ?? null,
+        duration: data.duration ?? undefined,
+        status,
+      })
+      return status
+    } catch {
+      return null
+    }
+  }, [])
+
+  const handleUploadSuccess = useCallback((newFileId: string, fileUrl: string) => {
+    stopPolling()
     setFileId(newFileId)
     setVideoUrl(fileUrl)
-    setMoments([])
-    setFileMetadata(null)
-
-    setStatusBanner({
-      variant: 'success',
-      title: 'Upload complete',
-      message: 'We are processing your media. Detected moments and transcripts will populate automatically.',
+    setEvents([])
+    setSelectedEventId(null)
+    setCaseInfo({
+      fileId: newFileId,
+      filename: 'Processing...',
+      status: 'pending',
     })
+    setProcessingStatus('pending')
+  }, [stopPolling])
 
-    // The useEffect hook will handle polling when fileId changes
-    // No need to set up polling here as it's handled in useEffect
-  }
-
-  const handleTranscribe = async () => {
-    if (!fileId) return
-
-    setTranscribing(true)
-    setStatusBanner({
-      variant: 'info',
-      title: 'Submitting transcription request',
-      message: 'Your file is being queued for transcription. The results will update automatically.',
-    })
-    try {
-      const result = await transcribeFile(fileId)
-      console.log('Transcription started:', result)
-      setStatusBanner({
-        variant: 'success',
-        title: 'Transcription job queued',
-        message: 'We will refresh the transcript view as soon as the processing finishes.',
-      })
-    } catch (error) {
-      console.error('Failed to start transcription:', error)
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-      setStatusBanner({
-        variant: 'error',
-        title: 'Unable to start transcription',
-        message: errorMsg,
-      })
-    } finally {
-      setTranscribing(false)
-    }
-  }
-
-  const handleDownloadTranscript = async () => {
-    if (!fileId) return
-
-    setDownloading(true)
-    try {
-      await downloadTranscript(fileId)
-      setStatusBanner({
-        variant: 'success',
-        title: 'Download started',
-        message: 'The comprehensive transcript file is being downloaded.',
-      })
-    } catch (error) {
-      console.error('Failed to download transcript:', error)
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-      setStatusBanner({
-        variant: 'error',
-        title: 'Unable to download transcript',
-        message: errorMsg || 'Transcript file may not be available yet. Please wait for processing to complete.',
-      })
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  const fetchMoments = async (id: string) => {
-    try {
-      const response = await fetch(`/api/moments?file_id=${id}`)
-      if (!response.ok) {
-        console.error('Failed to fetch moments:', response.status, response.statusText)
-        return
-      }
-      const data = await response.json()
-      const moments = data.moments || []
-      console.log(`Fetched ${moments.length} moments for file ${id}`)
-      if (moments.length > 0) {
-        // Log event types for debugging
-        const eventTypes = Array.from(new Set(moments.flatMap((m: Moment) => m.event_types || [])))
-        console.log('Event types found:', eventTypes)
-      }
-      setMoments(moments)
-
-      // If we got moments, stop polling
-      if (moments.length > 0 && momentsPollRef.current) {
-        clearInterval(momentsPollRef.current)
-        momentsPollRef.current = null
-        console.log('Stopped polling - moments found')
-      }
-    } catch (error) {
-      console.error('Failed to fetch moments:', error)
-    }
-  }
-
-  const fetchFileMetadata = async (id: string) => {
-    setLoadingMetadata(true)
-    try {
-      const response = await fetch(`/api/files/${id}/metadata`)
-      if (response.ok) {
-        const data = await response.json()
-        setFileMetadata(data.ocr_metadata)
-      }
-    } catch (error) {
-      console.error('Failed to fetch metadata:', error)
-    } finally {
-      setLoadingMetadata(false)
-    }
-  }
-
-  const handleTranscriptionStatusChange = (payload: TranscriptionStatusPayload) => {
-    if (lastTranscriptionState.current === payload.state && !payload.detail) {
-      return
-    }
-    lastTranscriptionState.current = payload.state
-
-    switch (payload.state) {
-      case 'processing':
-        setStatusBanner({
-          variant: 'info',
-          title: 'Transcription in progress',
-          message:
-            payload.detail || 'Hang tight while we generate the transcript. This can take a couple of minutes for longer clips.',
-        })
-        break
-      case 'ready':
-        setStatusBanner({
-          variant: 'success',
-          title: 'Transcription ready',
-          message: 'Click a segment below to jump directly to that moment in the video player.',
-        })
-        break
-      case 'error':
-        setStatusBanner({
-          variant: 'error',
-          title: 'Transcription unavailable',
-          message: payload.detail || 'We could not generate a transcript. Please retry or check the backend logs.',
-        })
-        break
-      case 'empty':
-        setStatusBanner({
-          variant: 'info',
-          title: 'No dialogue detected',
-          message: 'We processed the media but did not detect any speech to transcribe.',
-        })
-        break
-      case 'idle':
-        setStatusBanner(null)
-        break
-    }
-  }
-
-  // Fetch moments and metadata when fileId changes
   useEffect(() => {
     if (!fileId) {
-      setMoments([])
-      setFileMetadata(null)
+      setEvents([])
+      setCaseInfo(null)
+      setProcessingStatus(null)
       return
     }
 
-    // Clear any existing polling
-    if (momentsPollRef.current) {
-      clearInterval(momentsPollRef.current)
-      momentsPollRef.current = null
-    }
-
-    // Initial fetch
+    stopPolling()
     fetchMoments(fileId)
-    fetchFileMetadata(fileId)
+    fetchMetadata(fileId)
 
-    // Set up continuous polling until moments are found
-    let pollCount = 0
-    const maxPolls = 60 // 2 minutes
-    const pollInterval = window.setInterval(async () => {
-      pollCount++
+    pollRef.current = window.setInterval(async () => {
       await fetchMoments(fileId)
-      if (pollCount >= maxPolls) {
-        clearInterval(pollInterval)
-        momentsPollRef.current = null
-        console.log('Stopped polling for moments after maximum attempts')
+      const status = await fetchMetadata(fileId)
+      if (status === 'completed' || status === 'failed') {
+        stopPolling()
       }
-    }, 2000)
-    momentsPollRef.current = pollInterval
+    }, 3000)
 
-    // Poll for metadata too, as OCR might take time
-    const metadataInterval = setInterval(() => {
-      fetchFileMetadata(fileId)
-    }, 5000)
+    return stopPolling
+  }, [fileId, stopPolling, fetchMoments, fetchMetadata])
 
-    return () => {
-      if (momentsPollRef.current) {
-        clearInterval(momentsPollRef.current)
-        momentsPollRef.current = null
-      }
-      clearInterval(metadataInterval)
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => a.timestamp - b.timestamp),
+    [events]
+  )
+
+  const selectedEvent = useMemo(
+    () => sortedEvents.find((e) => e.id === selectedEventId) ?? null,
+    [sortedEvents, selectedEventId]
+  )
+
+  const handleSelectEvent = useCallback((ev: DetectedEvent) => {
+    setSelectedEventId(ev.id)
+    seekTo(ev.timestamp)
+  }, [seekTo])
+
+  const handleJumpToNextEvent = useCallback(() => {
+    const next = sortedEvents.find((ev) => ev.timestamp > currentTime + 0.5)
+    if (next) {
+      setSelectedEventId(next.id)
+      seekTo(next.timestamp)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileId])
+  }, [sortedEvents, currentTime, seekTo])
+
+  const handleJumpToPrevEvent = useCallback(() => {
+    const prev = [...sortedEvents].reverse().find((ev) => ev.timestamp < currentTime - 0.5)
+    if (prev) {
+      setSelectedEventId(prev.id)
+      seekTo(prev.timestamp)
+    }
+  }, [sortedEvents, currentTime, seekTo])
+
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const [mobileTab, setMobileTab] = useState<'video' | 'events' | 'transcript' | 'ai'>('video')
+
+  const isProcessing = processingStatus !== null &&
+    processingStatus !== 'completed' &&
+    processingStatus !== 'failed'
+
+  if (!fileId) {
+    return (
+      <div className="h-screen flex flex-col" style={{ background: 'hsl(var(--bg))' }}>
+        <CaseHeader caseInfo={null} onUploadSuccess={handleUploadSuccess} />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center max-w-md px-6">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: 'hsl(var(--primary) / 0.1)' }}>
+              <svg className="w-8 h-8" style={{ color: 'hsl(var(--primary))' }} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold mb-2" style={{ color: 'hsl(var(--text))' }}>Upload Body Camera Footage</h2>
+            <p className="text-sm leading-relaxed" style={{ color: 'hsl(var(--muted))' }}>
+              Drag and drop or click "Upload Footage" to begin automated analysis of audio, video, and transcript data.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-4xl font-bold text-gray-800 mb-8 text-center">
-          ALERT — Audio-Visual Log Event Recognition Toolkit
-        </h1>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'hsl(var(--bg))' }}>
+      <CaseHeader caseInfo={caseInfo} onUploadSuccess={handleUploadSuccess} />
 
-        {statusBanner && (
-          <div className="mx-auto mb-6 max-w-3xl">
-            <StatusBanner
-              variant={statusBanner.variant}
-              title={statusBanner.title}
-              message={statusBanner.message}
-              onClose={() => setStatusBanner(null)}
-            />
-          </div>
-        )}
+      {isProcessing && (
+        <div className="px-3 py-1.5 flex-shrink-0">
+          <ProcessingPipeline status={processingStatus} eventCount={events.length} />
+        </div>
+      )}
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-          {/* Left Column: Upload and Controls */}
-          <div className="space-y-6">
-            <div className="rounded-lg bg-white p-6 shadow-md">
-              <h2 className="mb-4 text-2xl font-semibold">Upload Media</h2>
-              <UploadForm onUploadSuccess={handleUploadSuccess} />
-            </div>
+      {isDesktop ? (
+        /* Desktop: 3-pane resizable */
+        <div className="flex-1 min-h-0 p-1.5">
+          <Group orientation="horizontal" id="alert-h" className="h-full">
+            <Panel defaultSize="22%" minSize="16%" maxSize="32%" id="p-events">
+              <div className="h-full panel-elevated overflow-hidden flex flex-col">
+                <EventPanel
+                  events={sortedEvents}
+                  isProcessing={isProcessing}
+                  selectedEventId={selectedEventId}
+                  onSelectEvent={handleSelectEvent}
+                />
+              </div>
+            </Panel>
 
-            {fileId && (
-              <>
-                <BodyCamInfo metadata={fileMetadata} isLoading={loadingMetadata} />
+            <Separator style={{ width: 8, cursor: 'col-resize' }} id="s1" />
 
-                <div className="rounded-lg bg-white p-6 shadow-md">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-2xl font-semibold">Transcription</h2>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleDownloadTranscript}
-                        disabled={downloading || !fileId}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                      >
-                        {downloading ? 'Downloading...' : 'Download Transcript'}
-                      </button>
-                      <button
-                        onClick={handleTranscribe}
-                        disabled={transcribing}
-                        className="rounded-lg bg-green-600 px-4 py-2 text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                      >
-                        {transcribing ? 'Transcribing...' : 'Transcribe'}
-                      </button>
-                    </div>
+            <Panel defaultSize="52%" minSize="30%" id="p-center">
+              <Group orientation="vertical" id="alert-v" className="h-full">
+                <Panel defaultSize="62%" minSize="30%" id="p-video">
+                  <div className="h-full flex flex-col gap-1.5 overflow-hidden">
+                    <VideoPlayer
+                      videoUrl={videoUrl}
+                      events={sortedEvents}
+                      onJumpToNextEvent={handleJumpToNextEvent}
+                      onJumpToPrevEvent={handleJumpToPrevEvent}
+                    />
                   </div>
-                  <TranscriptionView fileId={fileId} onStatusChange={handleTranscriptionStatusChange} />
-                </div>
+                </Panel>
 
-                <div className="rounded-lg bg-white p-6 shadow-md">
-                  <h2 className="mb-4 text-2xl font-semibold">Detected Moments</h2>
-                  <MomentDropdown
-                    moments={moments}
-                    onMomentSelect={(moment) => {
-                      const event = new CustomEvent('seekTo', { detail: moment.start_time })
-                      window.dispatchEvent(event)
-                    }}
-                    onRefresh={async () => {
-                      if (fileId) {
-                        await fetchMoments(fileId)
-                      }
-                    }}
-                    fileId={fileId}
-                  />
-                </div>
-              </>
+                <Separator style={{ height: 8, cursor: 'row-resize' }} id="s2" />
+
+                <Panel defaultSize="38%" minSize="12%" id="p-transcript">
+                  <div className="h-full panel-elevated overflow-hidden">
+                    <TranscriptPanel fileId={fileId} selectedEvent={selectedEvent} />
+                  </div>
+                </Panel>
+              </Group>
+            </Panel>
+
+            <Separator style={{ width: 8, cursor: 'col-resize' }} id="s3" />
+
+            <Panel defaultSize="26%" minSize="18%" maxSize="36%" id="p-ai">
+              <div className="h-full panel-elevated overflow-hidden">
+                <AIAssistant
+                  fileId={fileId}
+                  caseInfo={caseInfo}
+                  selectedEvent={selectedEvent}
+                />
+              </div>
+            </Panel>
+          </Group>
+        </div>
+      ) : (
+        /* Mobile/Tablet: tabbed layout */
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden p-1.5">
+            {mobileTab === 'video' && (
+              <div className="h-full flex flex-col gap-1.5 overflow-auto">
+                <VideoPlayer
+                  videoUrl={videoUrl}
+                  events={sortedEvents}
+                  onJumpToNextEvent={handleJumpToNextEvent}
+                  onJumpToPrevEvent={handleJumpToPrevEvent}
+                />
+              </div>
+            )}
+            {mobileTab === 'events' && (
+              <div className="h-full panel-elevated overflow-hidden">
+                <EventPanel
+                  events={sortedEvents}
+                  isProcessing={isProcessing}
+                  selectedEventId={selectedEventId}
+                  onSelectEvent={(ev) => { handleSelectEvent(ev); setMobileTab('video') }}
+                />
+              </div>
+            )}
+            {mobileTab === 'transcript' && (
+              <div className="h-full panel-elevated overflow-hidden">
+                <TranscriptPanel fileId={fileId} selectedEvent={selectedEvent} />
+              </div>
+            )}
+            {mobileTab === 'ai' && (
+              <div className="h-full panel-elevated overflow-hidden">
+                <AIAssistant fileId={fileId} caseInfo={caseInfo} selectedEvent={selectedEvent} />
+              </div>
             )}
           </div>
 
-          {/* Right Column: Video Player */}
-          <div className="space-y-6">
-            <div className="rounded-lg bg-white p-6 shadow-md">
-              <h2 className="mb-4 text-2xl font-semibold">Video Player</h2>
-              <VideoPlayer videoUrl={videoUrl} moments={moments} />
-            </div>
-
-            {fileId && <ChatBot fileId={fileId} />}
+          {/* Bottom tab bar */}
+          <div className="flex-shrink-0 flex" style={{ background: 'hsl(var(--surface-1))', borderTop: '1px solid hsl(var(--border))' }}>
+            {([
+              { id: 'video' as const, label: 'Video', icon: 'M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z' },
+              { id: 'events' as const, label: 'Events', icon: 'M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z' },
+              { id: 'transcript' as const, label: 'Transcript', icon: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z' },
+              { id: 'ai' as const, label: 'AI', icon: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z' },
+            ]).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setMobileTab(tab.id)}
+                className="flex-1 flex flex-col items-center gap-0.5 py-2 transition-colors"
+                style={{ color: mobileTab === tab.id ? 'hsl(var(--primary))' : 'hsl(var(--muted-2))' }}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
+                </svg>
+                <span className="text-[10px] font-medium">{tab.label}</span>
+              </button>
+            ))}
           </div>
         </div>
-
-        <footer className="mt-12 text-center text-sm text-gray-500">
-          <p>
-            Created by Mario Sumali (msumali@stanford.edu) and Shane Mion (smion@stanford.edu) in collaboration with Big
-            Local News
-          </p>
-        </footer>
-      </div>
+      )}
     </div>
   )
 }
