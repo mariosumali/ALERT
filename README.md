@@ -2,7 +2,7 @@
 
 **Created by Mario Sumali**
 
-A three-panel investigative workspace for analyzing body camera and dash cam footage. Upload video, get automated transcription, audio event detection, and AI-powered analysis — all in one view.
+An investigative workspace for analyzing body camera and dash cam footage. Upload video, get automated transcription, audio event detection, and AI-powered analysis — all in one view.
 
 ![ALERT Screenshot](docs/alert-screenshot.png)
 
@@ -16,10 +16,12 @@ A three-panel investigative workspace for analyzing body camera and dash cam foo
 
 - **Automated transcription** — Speech-to-text synced to video playback.
 - **Audio event detection** — Gunshots, profanity, anomalies, and more flagged with confidence scores.
+- **Multimodal video analysis** — Gemini-powered analysis of video segments for scene classification, people counting, use-of-force detection, camera obfuscation, and more.
+- **Agentic AI chat** — GPT orchestrator with Gemini visual QA: the AI can request and analyze specific video segments on demand to answer visual questions.
 - **AI-powered analysis** — Ask questions, generate incident reports, and get contextual summaries.
 - **Interactive timeline** — Color-coded event markers with click-to-seek navigation.
 - **Searchable & filterable** — Full-text search across events and transcript.
-- **Responsive UI** — Resizable 3-panel layout with light and dark mode.
+- **Responsive UI** — Resizable layout with light and dark mode.
 
 ## Architecture
 
@@ -27,7 +29,8 @@ A three-panel investigative workspace for analyzing body camera and dash cam foo
 - **Backend**: FastAPI (Python)
 - **Transcription**: OpenAI Whisper API
 - **Audio Analysis**: Librosa + custom detection (gunshot, profanity, anomaly, silence)
-- **AI Chat**: GPT-4o with transcript + visual frame context
+- **Video Analysis**: Google Gemini 2.5 Flash (structured video chunk analysis)
+- **AI Chat**: GPT-4o-mini orchestrator with Gemini visual QA tool calling (agentic loop)
 - **OCR**: Frame extraction + metadata parsing
 - **Database**: PostgreSQL
 - **Task Queue**: Celery + Redis
@@ -51,12 +54,15 @@ A three-panel investigative workspace for analyzing body camera and dash cam foo
 │   │   ├── gunshot_detection.py
 │   │   ├── profanity_detection.py
 │   │   ├── ocr_extraction.py    # Video frame OCR
-│   │   └── gpt_event_detection.py
+│   │   ├── gpt_event_detection.py
+│   │   ├── gemini_client.py     # Gemini API wrapper (structured + free-form)
+│   │   ├── video_chunking.py    # ffmpeg video segmentation
+│   │   └── segment_analysis.py  # Multimodal segment metadata extraction
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx              # Main 3-pane layout
+│   │   ├── App.tsx              # Main layout
 │   │   ├── components/
 │   │   │   ├── CaseHeader.tsx   # Header bar + metadata popover
 │   │   │   ├── VideoPlayer.tsx  # Video + timeline + controls
@@ -151,15 +157,20 @@ npm run dev
 |--------|----------|-------------|
 | `POST` | `/api/upload` | Upload a video/audio file |
 | `GET` | `/api/moments` | Get detected events (optional `?file_id=`) |
+| `GET` | `/api/segments?file_id=` | Get Gemini video segment analysis |
 | `GET` | `/api/files/{id}/metadata` | Get file metadata + OCR data |
 | `GET` | `/api/transcribe?file_id=` | Get transcription segments |
-| `POST` | `/api/chat` | Chat with AI about the footage |
+| `POST` | `/api/chat` | Chat with AI about the footage (agentic when Gemini enabled) |
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | Required for transcription and AI chat | — |
+| `GEMINI_API_KEY` | Google Gemini API key (enables multimodal video analysis) | — |
+| `ENABLE_GEMINI_ANALYSIS` | Toggle Gemini video analysis on/off | `false` |
+| `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
+| `VIDEO_CHUNK_SECONDS` | Duration of video chunks for analysis | `300` (5 min) |
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/multimedia_events` |
 | `CELERY_BROKER_URL` | Redis broker URL | `redis://localhost:6379/0` |
 | `CELERY_RESULT_BACKEND` | Redis result backend | `redis://localhost:6379/0` |

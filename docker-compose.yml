@@ -36,6 +36,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ENABLE_GEMINI_ANALYSIS: ${ENABLE_GEMINI_ANALYSIS:-false}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      VIDEO_CHUNK_SECONDS: ${VIDEO_CHUNK_SECONDS:-300}
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
@@ -55,6 +59,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ENABLE_GEMINI_ANALYSIS: ${ENABLE_GEMINI_ANALYSIS:-false}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      VIDEO_CHUNK_SECONDS: ${VIDEO_CHUNK_SECONDS:-300}
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
