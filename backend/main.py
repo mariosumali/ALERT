@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import upload, moments, transcribe, chat
+from routes import upload, moments, transcribe, chat, segments
 
 app = FastAPI(title="Multimedia Event Parsing Platform", version="1.0.0")
 
@@ -18,6 +18,7 @@ app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(moments.router, prefix="/api", tags=["moments"])
 app.include_router(transcribe.router, prefix="/api", tags=["transcribe"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(segments.router, prefix="/api", tags=["segments"])
 
 @app.get("/")
 async def root():
