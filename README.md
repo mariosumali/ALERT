@@ -1,57 +1,78 @@
 # ALERT — Audio-Visual Log Event Recognition Toolkit
-# Created by Mario Sumali & Shane Mion
 
-A toolkit for uploading, transcribing, and detecting events in long audio/video files, with a searchable web UI.
+**Created by Mario Sumali & Shane Mion**
 
-## 🎥 Demo Video
+A three-panel investigative workspace for analyzing body camera and dash cam footage. Upload video, get automated transcription, audio event detection, and AI-powered analysis — all in one view.
+
+![ALERT Screenshot](docs/alert-screenshot.png)
+
+## Demo Video
 
 [![ALERT Demo](https://img.youtube.com/vi/qM6ZRfXLaUo/maxresdefault.jpg)](https://www.youtube.com/watch?v=qM6ZRfXLaUo)
 
 *Click the thumbnail above to watch the full demo on YouTube.*
 
+## Features
+
+- **Resizable 3-panel layout** — Events sidebar, video + transcript center, AI assistant on the right. Drag to resize.
+- **Automated transcription** — Speech-to-text via OpenAI Whisper, synced to playback with click-to-seek.
+- **Audio event detection** — Gunshots, profanity, frequency anomalies, loud sounds, compliance issues, and more flagged automatically with confidence scores.
+- **OCR metadata extraction** — Camera model, device ID, badge number, and recording timestamp pulled from video frames.
+- **AI Assist** — Ask questions about the footage or generate structured reports (incident summary, timeline, use-of-force analysis). Timestamp citations are clickable.
+- **Mini timeline** — Scrubber bar with color-coded event markers. Click any marker to jump to that moment.
+- **Playback controls** — Speed adjustment (0.5x–2x), skip ±5s, jump between events, keyboard shortcuts (J/K/L/Q/E).
+- **Search & filter** — Search events and transcript text, filter by event category.
+- **Light & dark mode** — Toggle via the header button, respects OS preference.
+- **Responsive** — Full 3-pane layout on desktop, tabbed navigation on mobile/tablet.
+
 ## Architecture
 
-- **Frontend**: React + TypeScript + Vite + Tailwind CSS
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, react-resizable-panels
 - **Backend**: FastAPI (Python)
-- **Transcription**: OpenAI Whisper API (with mock fallback)
-- **Event Detection**: PyTorch (with placeholder model)
+- **Transcription**: OpenAI Whisper API
+- **Audio Analysis**: Librosa + custom detection (gunshot, profanity, anomaly, silence)
+- **AI Chat**: GPT-4o with transcript + visual frame context
+- **OCR**: Frame extraction + metadata parsing
 - **Database**: PostgreSQL
 - **Task Queue**: Celery + Redis
-- **Storage**: Local filesystem (S3 optional)
+- **Storage**: Local filesystem
 
 ## Project Structure
 
 ```
 ├── backend/
-│   ├── main.py               # FastAPI entrypoint
+│   ├── main.py                  # FastAPI entrypoint
+│   ├── celery_worker.py         # Celery async tasks
 │   ├── routes/
-│   │   ├── upload.py         # /upload endpoint
-│   │   ├── moments.py        # /moments endpoint
+│   │   ├── upload.py            # /upload, /files, /transcribe, /chat endpoints
+│   │   └── moments.py           # /moments endpoint
 │   ├── models/
-│   │   ├── database.py       # SQLAlchemy setup
-│   │   ├── schema.py         # Database models
+│   │   ├── database.py          # SQLAlchemy setup
+│   │   └── schema.py            # Database models
 │   ├── services/
-│   │   ├── transcription.py  # Whisper wrapper
-│   │   ├── audio_features.py # Audio feature extraction
-│   │   ├── video_features.py # Video feature extraction
-│   │   ├── detect_events.py  # Event detection (dummy implementation)
-│   │   ├── train_event_detector.py # Model training script
-│   ├── utils/
-│   │   ├── s3_client.py      # S3 utilities
-│   │   ├── helpers.py
-│   ├── celery_worker.py      # Celery async tasks
+│   │   ├── transcription.py     # Whisper transcription
+│   │   ├── audio_anomaly_detection.py
+│   │   ├── gunshot_detection.py
+│   │   ├── profanity_detection.py
+│   │   ├── ocr_extraction.py    # Video frame OCR
+│   │   └── gpt_event_detection.py
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
+│   │   ├── App.tsx              # Main 3-pane layout
 │   │   ├── components/
-│   │   │   ├── UploadForm.tsx
-│   │   │   ├── VideoPlayer.tsx
-│   │   │   ├── MomentDropdown.tsx
-│   │   ├── pages/
-│   │   │   ├── index.tsx (App.tsx)
-│   │   ├── utils/
-│   │   │   ├── api.ts
+│   │   │   ├── CaseHeader.tsx   # Header bar + metadata popover
+│   │   │   ├── VideoPlayer.tsx  # Video + timeline + controls
+│   │   │   ├── EventPanel.tsx   # Left sidebar events list
+│   │   │   ├── TranscriptPanel.tsx
+│   │   │   ├── AIAssistant.tsx  # Right sidebar AI chat
+│   │   │   └── ProcessingPipeline.tsx
+│   │   ├── contexts/
+│   │   │   ├── VideoContext.tsx  # Shared video state
+│   │   │   └── ThemeContext.tsx  # Light/dark mode
+│   │   ├── types/
+│   │   └── utils/
 │   ├── package.json
 │   └── Dockerfile
 ├── docker-compose.yml
@@ -63,23 +84,15 @@ A toolkit for uploading, transcribing, and detecting events in long audio/video 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Create a `.env` file with `OPENAI_API_KEY=your-key`
-- OR Python 3.11+, Node.js 18+, PostgreSQL, Redis
+- An OpenAI API key (for transcription and AI chat)
+- OR: Python 3.11+, Node.js 18+, PostgreSQL, Redis
 
 ### Option 1: Docker Compose (Recommended)
 
-1. **Set up OpenAI API Key (for transcription):**
-   ```bash
-   # Get your API key from: https://platform.openai.com/api-keys
-   export OPENAI_API_KEY="your-api-key-here"
-   ```
-   
-   Alternatively, create a `.env` file in the project root:
+1. **Set up your API key:**
    ```bash
    echo "OPENAI_API_KEY=your-api-key-here" > .env
    ```
-   
-   **Note:** If you don't set the API key, the system will use mock transcription (fast but not real).
 
 2. **Start all services:**
    ```bash
@@ -91,143 +104,71 @@ A toolkit for uploading, transcribing, and detecting events in long audio/video 
    docker-compose exec backend python -c "from models.database import init_db; init_db()"
    ```
 
-4. **Access the application:**
+4. **Open the app:**
    - Frontend: http://localhost:5001
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+   - API docs: http://localhost:8000/docs
 
 ### Option 2: Local Development
 
-#### Backend Setup
+#### Backend
 
-1. **Install dependencies:**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ```
+```bash
+cd backend
+pip install -r requirements.txt
+createdb multimedia_events
+python -c "from models.database import init_db; init_db()"
+redis-server &
+uvicorn main:app --reload &
+celery -A celery_worker.celery_app worker --loglevel=info
+```
 
-2. **Set up PostgreSQL:**
-   ```bash
-   # Create database
-   createdb multimedia_events
-   ```
+#### Frontend
 
-3. **Initialize database:**
-   ```bash
-   python -c "from models.database import init_db; init_db()"
-   ```
-
-4. **Start Redis:**
-   ```bash
-   redis-server
-   ```
-
-5. **Start FastAPI server:**
-   ```bash
-   uvicorn main:app --reload
-   ```
-
-6. **Start Celery worker (in another terminal):**
-   ```bash
-   celery -A celery_worker.celery_app worker --loglevel=info
-   ```
-
-#### Frontend Setup
-
-1. **Install dependencies:**
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-2. **Start development server:**
-   ```bash
-   npm run dev
-   ```
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ## Usage
 
-1. **Upload a video/audio file** through the web UI
-2. The backend will:
-   - Save the file
-   - Launch a Celery task to transcribe and detect events
-   - Return 3 dummy moments (for testing)
-3. **View detected moments** in the dropdown
-4. **Filter by event type** (Gunshot, Silence, Motion, etc.)
-5. **Click a moment** to seek the video player to that timestamp
+1. **Upload footage** — Click "Upload Footage" or drag and drop a video/audio file.
+2. **Watch processing** — The pipeline indicator shows transcription, audio analysis, and event detection progress.
+3. **Review events** — The left panel lists detected events with category badges, timestamps, confidence scores, and expandable descriptions. Filter by type or search.
+4. **Read the transcript** — The bottom center panel shows the full transcript synced to playback. Click any line to seek. Active lines highlight automatically.
+5. **Ask the AI** — The right panel provides contextual analysis. Use quick prompts or type custom questions. Generate incident summaries, timelines, or reports.
+6. **Navigate** — Click event markers on the timeline, use keyboard shortcuts, or adjust playback speed.
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `K` or `Space` | Play / Pause |
+| `J` | Skip back 5s |
+| `L` | Skip forward 5s |
+| `Q` | Jump to previous event |
+| `E` | Jump to next event |
 
 ## API Endpoints
 
-### POST /api/upload
-Upload a video/audio file.
-
-**Request:** Multipart form data with `file` field
-
-**Response:**
-```json
-{
-  "file_id": "uuid",
-  "message": "File uploaded successfully. Processing started.",
-  "status": "processing"
-}
-```
-
-### GET /api/moments
-Get detected moments of interest.
-
-**Query Parameters:**
-- `file_id` (optional): Filter by file ID
-
-**Response:**
-```json
-{
-  "moments": [
-    {
-      "moment_id": "uuid",
-      "file_id": "uuid",
-      "start_time": 5.0,
-      "end_time": 8.0,
-      "event_types": ["Gunshot"],
-      "interest_score": 0.95,
-      "description": "Loud noise detected, possible gunshot"
-    }
-  ],
-  "count": 1
-}
-```
-
-## Model Training (BETA FEATURE)
-
-To train the event detector model:
-
-1. **Prepare labeled CSV** with columns: `file_id`, `start_time`, `end_time`, `event_type`
-
-2. **Run training:**
-   ```bash
-   python backend/services/train_event_detector.py labeled_data.csv
-   ```
-
-3. **Model will be saved** to `backend/models/event_detector.pt`
-
-4. **Update `detect_events.py`** to load and use the trained model
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/upload` | Upload a video/audio file |
+| `GET` | `/api/moments` | Get detected events (optional `?file_id=`) |
+| `GET` | `/api/files/{id}/metadata` | Get file metadata + OCR data |
+| `GET` | `/api/transcribe?file_id=` | Get transcription segments |
+| `POST` | `/api/chat` | Chat with AI about the footage |
 
 ## Environment Variables
 
-### Backend
-- `DATABASE_URL`: PostgreSQL connection string (default: `postgresql://postgres:postgres@localhost:5432/multimedia_events`)
-- `CELERY_BROKER_URL`: Redis broker URL (default: `redis://localhost:6379/0`)
-- `CELERY_RESULT_BACKEND`: Redis result backend (default: `redis://localhost:6379/0`)
-- `AWS_ACCESS_KEY_ID`: Optional, for S3 storage
-- `AWS_SECRET_ACCESS_KEY`: Optional, for S3 storage
-- `AWS_REGION`: Optional, for S3 storage
-
-### Frontend
-- `VITE_API_BASE_URL`: Backend API URL (default: `/api`)
-
-- File uploads are stored in `./uploads` directory
-- Database migrations are handled via SQLAlchemy's `create_all()`
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | Required for transcription and AI chat | — |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/multimedia_events` |
+| `CELERY_BROKER_URL` | Redis broker URL | `redis://localhost:6379/0` |
+| `CELERY_RESULT_BACKEND` | Redis result backend | `redis://localhost:6379/0` |
+| `VITE_API_BASE_URL` | Backend API URL (frontend) | `/api` |
 
 ## License
 
 MIT
-
