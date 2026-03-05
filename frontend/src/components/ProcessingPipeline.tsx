@@ -17,6 +17,7 @@ function deriveStages(status: ProcessingStatus | null, eventCount: number): Stag
     { id: 'transcription', label: 'Transcription', state: 'pending' },
     { id: 'audio', label: 'Audio Analysis', state: 'pending' },
     { id: 'events', label: 'Event Detection', state: 'pending' },
+    { id: 'video_analysis', label: 'Video Analysis', state: 'pending' },
   ]
 
   if (!status || status === 'pending') {
@@ -32,6 +33,14 @@ function deriveStages(status: ProcessingStatus | null, eventCount: number): Stag
   if (status === 'processing_audio') {
     stages[1].state = 'done'
     stages[2].state = 'active'
+    return stages
+  }
+
+  if (status === 'processing_video_analysis') {
+    stages[1].state = 'done'
+    stages[2].state = 'done'
+    stages[3].state = 'done'
+    stages[4].state = 'active'
     return stages
   }
 

@@ -41,6 +41,7 @@ export type ProcessingStatus =
   | 'pending'
   | 'processing_transcription'
   | 'processing_audio'
+  | 'processing_video_analysis'
   | 'completed'
   | 'failed'
 
@@ -51,13 +52,16 @@ export type ProcessingStage = {
 }
 
 export const EVENT_COLORS: Record<string, { bg: string; text: string; dot: string; darkBg: string; darkText: string }> = {
-  Gunshot:          { bg: 'bg-red-50',     text: 'text-red-700',    dot: 'bg-red-600',    darkBg: 'dark:bg-red-950/40',     darkText: 'dark:text-red-400' },
-  LoudSound:        { bg: 'bg-orange-50',  text: 'text-orange-700', dot: 'bg-orange-600', darkBg: 'dark:bg-orange-950/40',  darkText: 'dark:text-orange-400' },
-  Profanity:        { bg: 'bg-violet-50',  text: 'text-violet-700', dot: 'bg-violet-600', darkBg: 'dark:bg-violet-950/40',  darkText: 'dark:text-violet-400' },
-  Silence:          { bg: 'bg-gray-50',    text: 'text-gray-500',   dot: 'bg-gray-400',   darkBg: 'dark:bg-gray-800/40',    darkText: 'dark:text-gray-500' },
-  SuddenChange:     { bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-600',  darkBg: 'dark:bg-amber-950/40',   darkText: 'dark:text-amber-400' },
-  FrequencyAnomaly: { bg: 'bg-pink-50',    text: 'text-pink-700',   dot: 'bg-pink-600',   darkBg: 'dark:bg-pink-950/40',    darkText: 'dark:text-pink-400' },
-  Distortion:       { bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500',  darkBg: 'dark:bg-amber-950/40',   darkText: 'dark:text-amber-400' },
+  Gunshot:                  { bg: 'bg-red-50',      text: 'text-red-700',     dot: 'bg-red-600',     darkBg: 'dark:bg-red-950/40',      darkText: 'dark:text-red-400' },
+  LoudSound:                { bg: 'bg-orange-50',   text: 'text-orange-700',  dot: 'bg-orange-600',  darkBg: 'dark:bg-orange-950/40',   darkText: 'dark:text-orange-400' },
+  Profanity:                { bg: 'bg-violet-50',   text: 'text-violet-700',  dot: 'bg-violet-600',  darkBg: 'dark:bg-violet-950/40',   darkText: 'dark:text-violet-400' },
+  Silence:                  { bg: 'bg-gray-50',     text: 'text-gray-500',    dot: 'bg-gray-400',    darkBg: 'dark:bg-gray-800/40',     darkText: 'dark:text-gray-500' },
+  SuddenChange:             { bg: 'bg-amber-50',    text: 'text-amber-700',   dot: 'bg-amber-600',   darkBg: 'dark:bg-amber-950/40',    darkText: 'dark:text-amber-400' },
+  FrequencyAnomaly:         { bg: 'bg-pink-50',     text: 'text-pink-700',    dot: 'bg-pink-600',    darkBg: 'dark:bg-pink-950/40',     darkText: 'dark:text-pink-400' },
+  Distortion:               { bg: 'bg-amber-50',    text: 'text-amber-700',   dot: 'bg-amber-500',   darkBg: 'dark:bg-amber-950/40',    darkText: 'dark:text-amber-400' },
+  UseOfForce:               { bg: 'bg-rose-50',     text: 'text-rose-700',    dot: 'bg-rose-600',    darkBg: 'dark:bg-rose-950/40',     darkText: 'dark:text-rose-400' },
+  PotentialExcessiveForce:  { bg: 'bg-red-100',     text: 'text-red-800',     dot: 'bg-red-700',     darkBg: 'dark:bg-red-950/60',      darkText: 'dark:text-red-300' },
+  CameraObfuscation:        { bg: 'bg-slate-50',    text: 'text-slate-600',   dot: 'bg-slate-500',   darkBg: 'dark:bg-slate-800/40',    darkText: 'dark:text-slate-400' },
 }
 
 export const DEFAULT_EVENT_COLOR = {
@@ -66,13 +70,16 @@ export const DEFAULT_EVENT_COLOR = {
 }
 
 export const EVENT_TIMELINE_COLORS: Record<string, string> = {
-  Gunshot:          '#DC2626',
-  LoudSound:        '#EA580C',
-  Profanity:        '#7C3AED',
-  Silence:          '#6B7280',
-  SuddenChange:     '#D97706',
-  FrequencyAnomaly: '#DB2777',
-  Distortion:       '#D97706',
+  Gunshot:                  '#DC2626',
+  LoudSound:                '#EA580C',
+  Profanity:                '#7C3AED',
+  Silence:                  '#6B7280',
+  SuddenChange:             '#D97706',
+  FrequencyAnomaly:         '#DB2777',
+  Distortion:               '#D97706',
+  UseOfForce:               '#E11D48',
+  PotentialExcessiveForce:  '#991B1B',
+  CameraObfuscation:        '#475569',
 }
 
 export const DEFAULT_TIMELINE_COLOR = '#6366F1'

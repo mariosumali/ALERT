@@ -109,6 +109,7 @@ export interface ChatResponse {
   }
   visual_analysis_used?: boolean
   analyzed_timestamps?: number[]
+  gemini_segments_analyzed?: string[]
 }
 
 export async function chatWithTranscript(
@@ -121,6 +122,41 @@ export async function chatWithTranscript(
       file_id: fileId,
       messages: messages,
     }
+  )
+  return response.data
+}
+
+// ── Video Segment Metadata (Gemini Analysis) ────────────────────────────
+
+export interface VideoSegment {
+  id: number
+  file_id: string
+  segment_idx: number
+  start_sec: number
+  end_sec: number
+  scene_type: string | null
+  time_of_day: string | null
+  lighting: string | null
+  weather: string | null
+  camera_motion: string | null
+  camera_obfuscation_present: boolean
+  officers_count: number
+  civilians_count: number
+  use_of_force_present: boolean
+  use_of_force_types: string[]
+  potential_excessive_force: boolean
+  key_moments_summary: string | null
+  summary: string | null
+}
+
+export interface SegmentsResponse {
+  segments: VideoSegment[]
+  count: number
+}
+
+export async function getSegments(fileId: string): Promise<SegmentsResponse> {
+  const response = await axios.get<SegmentsResponse>(
+    `${API_BASE_URL}/segments?file_id=${fileId}`
   )
   return response.data
 }

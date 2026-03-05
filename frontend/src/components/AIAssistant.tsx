@@ -15,6 +15,7 @@ interface AssistantMessage {
   content: string
   visualAnalysis?: boolean
   timestamps?: number[]
+  geminiSegments?: string[]
 }
 
 interface QuickAction {
@@ -28,6 +29,8 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: 'flagged',   label: 'Explain why flagged', prompt: 'Explain why this segment was flagged as a notable event.' },
   { id: 'commands',  label: 'List commands given', prompt: 'List all officer commands and directives in chronological order with timestamps.' },
   { id: 'uof',       label: 'Use-of-force indicators?', prompt: 'Were there any use-of-force indicators? List all instances with timestamps.' },
+  { id: 'scene',     label: 'Describe the scene', prompt: 'Describe the visual scene in detail: environment, lighting, people present, and any notable objects or conditions.' },
+  { id: 'camera',    label: 'Camera issues?', prompt: 'Were there any camera obfuscation issues (blocked view, low light, blur)? List each with timestamps.' },
 ]
 
 const SUMMARY_ACTIONS: QuickAction[] = [
@@ -124,6 +127,7 @@ export default function AIAssistant({ fileId, caseInfo, selectedEvent }: AIAssis
         content: response.message.content,
         visualAnalysis: response.visual_analysis_used,
         timestamps: response.analyzed_timestamps ?? undefined,
+        geminiSegments: response.gemini_segments_analyzed ?? undefined,
       }])
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Analysis failed')
@@ -252,7 +256,18 @@ export default function AIAssistant({ fileId, caseInfo, selectedEvent }: AIAssis
                           <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
                           <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
                         </svg>
-                        Analyzed frames at {msg.timestamps.map((t) => formatTimestamp(t)).join(', ')}
+                        {msg.geminiSegments && msg.geminiSegments.length > 0
+                          ? `Gemini analyzed video segments: ${msg.geminiSegments.join(', ')}`
+                          : `Analyzed frames at ${msg.timestamps.map((t) => formatTimestamp(t)).join(', ')}`
+                        }
+                      </div>
+                    )}
+                    {msg.visualAnalysis && msg.geminiSegments && msg.geminiSegments.length > 0 && !(msg.timestamps && msg.timestamps.length > 0) && (
+                      <div className="mt-2 pt-1.5 flex items-center gap-1.5 text-[10px] text-muted-2" style={{ borderTop: '1px solid hsl(var(--border) / 0.3)' }}>
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm3 2h6v4H7V5zm8 8v2h1v-2h-1zm-2-2H7v4h6v-4zm2 0h1V9h-1v2zm1-4V5h-1v2h1zM5 5v2H4V5h1zm-1 4h1v2H4V9zm0 4h1v2H4v-2z" clipRule="evenodd" />
+                        </svg>
+                        Gemini analyzed video segments: {msg.geminiSegments.join(', ')}
                       </div>
                     )}
                   </div>

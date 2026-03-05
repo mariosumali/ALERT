@@ -5,6 +5,7 @@ import CaseHeader from './components/CaseHeader'
 import ProcessingPipeline from './components/ProcessingPipeline'
 import VideoPlayer from './components/VideoPlayer'
 import EventPanel from './components/EventPanel'
+import SegmentPanel from './components/SegmentPanel'
 import TranscriptPanel from './components/TranscriptPanel'
 import AIAssistant from './components/AIAssistant'
 import type { DetectedEvent, CaseMetadata, ProcessingStatus } from './types/events'
@@ -155,6 +156,7 @@ function App() {
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const [mobileTab, setMobileTab] = useState<'video' | 'events' | 'transcript' | 'ai'>('video')
+  const [leftTab, setLeftTab] = useState<'events' | 'segments'>('events')
 
   const isProcessing = processingStatus !== null &&
     processingStatus !== 'completed' &&
@@ -192,17 +194,38 @@ function App() {
       )}
 
       {isDesktop ? (
-        /* Desktop: 3-pane resizable */
+        /* Desktop: resizable layout */
         <div className="flex-1 min-h-0 p-1.5">
           <Group orientation="horizontal" id="alert-h" className="h-full">
             <Panel defaultSize="22%" minSize="16%" maxSize="32%" id="p-events">
               <div className="h-full panel-elevated overflow-hidden flex flex-col">
-                <EventPanel
-                  events={sortedEvents}
-                  isProcessing={isProcessing}
-                  selectedEventId={selectedEventId}
-                  onSelectEvent={handleSelectEvent}
-                />
+                <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid hsl(var(--border))' }}>
+                  {(['events', 'segments'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setLeftTab(tab)}
+                      className="flex-1 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition-colors"
+                      style={{
+                        background: leftTab === tab ? 'hsl(var(--primary) / 0.1)' : 'transparent',
+                        color: leftTab === tab ? 'hsl(var(--primary))' : 'hsl(var(--muted-2))',
+                      }}
+                    >
+                      {tab === 'events' ? 'Events' : 'Video Analysis'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {leftTab === 'events' ? (
+                    <EventPanel
+                      events={sortedEvents}
+                      isProcessing={isProcessing}
+                      selectedEventId={selectedEventId}
+                      onSelectEvent={handleSelectEvent}
+                    />
+                  ) : (
+                    <SegmentPanel fileId={fileId} />
+                  )}
+                </div>
               </div>
             </Panel>
 
