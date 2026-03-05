@@ -4,7 +4,8 @@ Extracts metadata from body cam overlays (timestamps, device IDs, etc.) using GP
 """
 import cv2
 import numpy as np
-from typing import Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional
 import base64
 import os
 import json
@@ -112,20 +113,20 @@ def extract_frame_for_ocr(video_path: str, frame_number: int = 30) -> Optional[n
         return None
 
 
-def extract_metadata_from_video(video_path: str, frames_to_try: list = [30, 60, 120]) -> Dict:
+def _extract_and_analyze(video_path: str, frame_num: int) -> Dict:
+    """Extract a single frame and send it to GPT-4o. Thread-safe."""
+    frame = extract_frame_for_ocr(video_path, frame_num)
+    if frame is None:
+        return {}
+    return analyze_frame_with_gpt4o(frame)
+
+
+def extract_metadata_from_video(video_path: str, frames_to_try: List[int] = [30, 60, 120]) -> Dict:
     """
     Extract metadata from video using GPT-4o.
-    Tries multiple frames until critical metadata is found.
-    
-    Args:
-        video_path: Path to video file
-        frames_to_try: List of frame numbers to try
-    
-    Returns:
-        Metadata dictionary
+    Sends all frame analyses in parallel for speed.
     """
-    # Initialize with empty values
-    best_metadata = {
+    best_metadata: Dict = {
         "raw_text": "",
         "timestamp": None,
         "device_id": None,
@@ -133,33 +134,28 @@ def extract_metadata_from_video(video_path: str, frames_to_try: list = [30, 60, 
         "badge_number": None,
         "officer_id": None,
     }
-    
-    for frame_num in frames_to_try:
-        print(f"[OCR] Sampling frame {frame_num} for GPT-4o analysis...")
-        
-        # Extract frame
-        frame = extract_frame_for_ocr(video_path, frame_num)
-        if frame is None:
-            continue
-            
-        # Analyze with GPT-4o
-        metadata = analyze_frame_with_gpt4o(frame)
-        
-        if metadata:
-            # Update best_metadata with any non-null values found
-            for key, value in metadata.items():
-                if value and not best_metadata.get(key):
-                    best_metadata[key] = value
-            
-            # If we have critical fields, we can stop
-            if best_metadata.get("timestamp") and best_metadata.get("device_id"):
-                print("[OCR] Found critical metadata with GPT-4o, stopping early.")
-                break
-    
-    # Print results
+
+    print(f"[OCR] Analyzing {len(frames_to_try)} frames in parallel...")
+
+    with ThreadPoolExecutor(max_workers=len(frames_to_try)) as executor:
+        futures = {
+            executor.submit(_extract_and_analyze, video_path, fn): fn
+            for fn in frames_to_try
+        }
+        for future in as_completed(futures):
+            frame_num = futures[future]
+            try:
+                metadata = future.result()
+                if metadata:
+                    for key, value in metadata.items():
+                        if value and not best_metadata.get(key):
+                            best_metadata[key] = value
+            except Exception as e:
+                print(f"[OCR] ⚠ Frame {frame_num} analysis failed: {e}")
+
     print(f"[OCR] Final metadata extraction results:")
     for k, v in best_metadata.items():
         if k != "raw_text" and v:
             print(f"[OCR]   {k}: {v}")
-            
+
     return best_metadata
