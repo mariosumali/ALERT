@@ -51,7 +51,7 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
         <div className="flex items-center gap-3">
           <span className="section-label">Timeline</span>
           {hasDuration && (
-            <span className="text-[11px] text-gray-400 dark:text-gray-500 font-mono tabular-nums">
+            <span className="text-[11px] text-muted-2 font-mono tabular-nums">
               {formatTimestamp(currentTime)} / {formatTimestamp(duration)}
             </span>
           )}
@@ -64,7 +64,7 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
                   className="w-2 h-2 rounded-sm"
                   style={{ backgroundColor: getTimelineColor(type) }}
                 />
-                <span className="text-[10px] text-gray-500 dark:text-gray-500">{type}</span>
+                <span className="text-[10px] text-muted-2">{type}</span>
               </div>
             ))}
           </div>
@@ -75,9 +75,7 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
       <div
         ref={trackRef}
         className={`relative h-8 rounded overflow-hidden select-none group ${
-          hasDuration
-            ? 'bg-gray-100 dark:bg-gray-800/60 cursor-pointer'
-            : 'bg-gray-100 dark:bg-gray-800/40'
+          hasDuration ? 'bg-surface3 cursor-pointer' : 'bg-surface3/60'
         }`}
         onClick={hasDuration ? handleTrackClick : undefined}
         onMouseMove={hasDuration ? handleTrackHover : undefined}
@@ -85,7 +83,7 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
       >
         {!hasDuration && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[10px] text-gray-400 dark:text-gray-600">
+            <span className="text-[10px] text-muted-2">
               Loading timeline...
             </span>
           </div>
@@ -130,8 +128,8 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
         {/* Hover tooltip */}
         {hoverTime !== null && (
           <div
-            className="absolute -top-6 -translate-x-1/2 px-1.5 py-0.5 rounded bg-gray-900 dark:bg-gray-100 text-[10px] font-mono text-white dark:text-gray-900 pointer-events-none z-30 opacity-0 group-hover:opacity-100 transition-opacity"
-            style={{ left: `${hoverX}px` }}
+            className="absolute -top-6 -translate-x-1/2 px-1.5 py-0.5 rounded text-[10px] font-mono pointer-events-none z-30 opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ left: `${hoverX}px`, background: 'hsl(var(--surface-1))', color: 'hsl(var(--text))', border: '1px solid hsl(var(--border))' }}
           >
             {formatTimestamp(hoverTime)}
           </div>
@@ -145,16 +143,16 @@ export default function EventTimeline({ events, visible }: EventTimelineProps) {
             className="w-1.5 h-1.5 rounded-sm flex-shrink-0"
             style={{ backgroundColor: getTimelineColor(hoveredEvent.type[0] || '') }}
           />
-          <span className="font-medium text-gray-700 dark:text-gray-300">
+          <span className="font-medium text-txt">
             {hoveredEvent.type.join(', ')}
           </span>
-          <span className="font-mono text-gray-400 tabular-nums">
+          <span className="font-mono text-muted-2 tabular-nums">
             {formatTimestamp(hoveredEvent.timestamp)}
           </span>
-          <span className="text-gray-500 dark:text-gray-500 truncate">
+          <span className="text-muted truncate">
             {hoveredEvent.description}
           </span>
-          <span className="text-gray-400 ml-auto flex-shrink-0 tabular-nums">
+          <span className="text-muted-2 ml-auto flex-shrink-0 tabular-nums">
             {(hoveredEvent.confidence * 100).toFixed(0)}%
           </span>
         </div>

@@ -168,7 +168,7 @@ function App() {
         <CaseHeader caseInfo={null} onUploadSuccess={handleUploadSuccess} />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md px-6">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: 'hsl(var(--primary) / 0.1)' }}>
+            <div className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-5" style={{ background: 'hsl(var(--primary) / 0.1)' }}>
               <svg className="w-8 h-8" style={{ color: 'hsl(var(--primary))' }} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
               </svg>
@@ -195,7 +195,7 @@ function App() {
 
       {isDesktop ? (
         /* Desktop: resizable layout */
-        <div className="flex-1 min-h-0 p-1.5">
+        <div className="flex-1 min-h-0 p-1">
           <Group orientation="horizontal" id="alert-h" className="h-full">
             <Panel defaultSize="22%" minSize="16%" maxSize="32%" id="p-events">
               <div className="h-full panel-elevated overflow-hidden flex flex-col">
@@ -270,7 +270,7 @@ function App() {
       ) : (
         /* Mobile/Tablet: tabbed layout */
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-hidden p-1.5">
+          <div className="flex-1 min-h-0 overflow-hidden p-1">
             {mobileTab === 'video' && (
               <div className="h-full flex flex-col gap-1.5 overflow-auto">
                 <VideoPlayer
