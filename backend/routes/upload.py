@@ -14,6 +14,19 @@ router = APIRouter()
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Accepted media extensions and how each maps to a processing type.
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
+ALLOWED_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+
+# Cap upload size to protect disk/memory (configurable). Default 2 GB.
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
+
+# Stream uploads to disk in 1 MB chunks instead of buffering the whole file
+# in memory — body-cam footage is routinely hundreds of MB.
+_CHUNK_SIZE = 1024 * 1024
+
+
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """
