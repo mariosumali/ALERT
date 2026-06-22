@@ -205,7 +205,7 @@ async def chat_with_transcript(request: ChatRequest):
 
         user_message = request.messages[-1].content if request.messages else ""
         timestamps = parse_timestamps(user_message)
-        video_path = os.path.join("uploads", f"{request.file_id}.mp4")
+        video_path = _resolve_video_path(file_metadata, request.file_id)
 
         # Build frame context for vision (legacy path, still useful)
         visual_analysis_used = False
@@ -456,7 +456,7 @@ def _build_moments_context(db, file_id: str) -> str:
         end_mins = int(moment.end_time // 60)
         end_secs = int(moment.end_time % 60)
         time_str = f"{start_mins}:{start_secs:02d} - {end_mins}:{end_secs:02d}"
-        confidence_pct = int(moment.interest_score * 100)
+        confidence_pct = int((moment.interest_score or 0.0) * 100)
 
         ctx += f"- [{event_type_str}] at {time_str} ({moment.start_time:.1f}s-{moment.end_time:.1f}s)"
         ctx += f" [Confidence: {confidence_pct}%]\n"
