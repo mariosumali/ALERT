@@ -42,11 +42,17 @@ dist-ssr/
 
 # Uploads
 uploads/
+backend/uploads/
+backend/segments/
 *.mp4
 *.mp3
 *.avi
 *.mov
 *.mkv
+*.webm
+*.m4v
+*.m4a
+*.wav
 
 # Generated data
 backend/moments/
