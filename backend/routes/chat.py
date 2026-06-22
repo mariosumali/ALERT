@@ -45,6 +45,27 @@ def _get_openai_client():
     return OpenAI(api_key=api_key)
 
 
+def _resolve_video_path(file_metadata: FileMetadata, file_id: str) -> str:
+    """Resolve the on-disk path to an uploaded file.
+
+    Uploads are stored as ``{file_id}{ext}`` where ``ext`` preserves the
+    original extension (.mp4, .avi, .mov, .webm, ...). The authoritative path
+    is recorded on ``file_metadata.path``; fall back to scanning the uploads
+    directory so visual analysis works for non-mp4 files too.
+    """
+    if file_metadata is not None and file_metadata.path and os.path.exists(file_metadata.path):
+        return file_metadata.path
+
+    uploads_dir = "uploads"
+    if os.path.isdir(uploads_dir):
+        for name in os.listdir(uploads_dir):
+            if name.startswith(file_id):
+                return os.path.join(uploads_dir, name)
+
+    # Last-resort legacy guess.
+    return os.path.join(uploads_dir, f"{file_id}.mp4")
+
+
 # ── Tool definitions for the agentic loop ────────────────────────────────
 
 AGENTIC_TOOLS = [
