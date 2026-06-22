@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import os
 import uuid
+import shutil
 import traceback
 from datetime import datetime
 from models.database import SessionLocal
@@ -36,22 +37,46 @@ async def upload_file(file: UploadFile = File(...)):
     try:
         # Generate unique file ID
         file_id = str(uuid.uuid4())
-        
-        # Determine file extension
-        file_ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
-        
-        # Save file
+
+        # Determine and validate the file extension.
+        file_ext = (os.path.splitext(file.filename)[1] if file.filename else "").lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file type '{file_ext or 'unknown'}'. Allowed types: {allowed}",
+            )
+
+        # Stream the file to disk in chunks, enforcing the size limit as we go.
         file_path = os.path.join(UPLOAD_DIR, f"{file_id}{file_ext}")
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        # Get file size
-        file_size = len(content)
-        
+        file_size = 0
+        try:
+            with open(file_path, "wb") as f:
+                while True:
+                    chunk = await file.read(_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    file_size += len(chunk)
+                    if file_size > MAX_UPLOAD_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File exceeds the maximum upload size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                        )
+                    f.write(chunk)
+        except HTTPException:
+            # Remove the partially written file on validation failure.
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+            raise
+
+        if file_size == 0:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
         # Determine file type (video or audio)
-        file_type = "video" if file_ext in [".mp4", ".avi", ".mov", ".mkv"] else "audio"
-        
+        file_type = "video" if file_ext in VIDEO_EXTENSIONS else "audio"
+
         # Save metadata to database
         db = SessionLocal()
         try:
