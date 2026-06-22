@@ -87,13 +87,16 @@ An investigative workspace for analyzing body camera and dash cam footage. Uploa
 
 - Docker and Docker Compose
 - An OpenAI API key (for transcription and AI chat)
-- OR: Python 3.11+, Node.js 18+, PostgreSQL, Redis
+- OR for local development: Python 3.11+, Node.js 18+, PostgreSQL, Redis, plus
+  the system tools `ffmpeg`, `tesseract-ocr`, and `libsndfile`
+  (macOS: `brew install ffmpeg tesseract libsndfile`).
 
 ### Option 1: Docker Compose (Recommended)
 
-1. **Set up your API key:**
+1. **Set up your API keys:**
    ```bash
-   echo "OPENAI_API_KEY=your-api-key-here" > .env
+   cp .env.example .env
+   # then edit .env and fill in OPENAI_API_KEY (and GEMINI_API_KEY if desired)
    ```
 
 2. **Start all services:**
@@ -101,14 +104,14 @@ An investigative workspace for analyzing body camera and dash cam footage. Uploa
    docker-compose up -d
    ```
 
-3. **Initialize database:**
-   ```bash
-   docker-compose exec backend python -c "from models.database import init_db; init_db()"
-   ```
+   The backend creates its database tables automatically on startup.
 
-4. **Open the app:**
+3. **Open the app:**
    - Frontend: http://localhost:5001
    - API docs: http://localhost:8000/docs
+
+> The schema is auto-created on startup. To (re)initialize it manually:
+> `docker-compose exec backend python init_db.py`
 
 ### Option 2: Local Development
 
@@ -116,11 +119,11 @@ An investigative workspace for analyzing body camera and dash cam footage. Uploa
 
 ```bash
 cd backend
+cp ../.env.example ../.env      # fill in your keys
 pip install -r requirements.txt
 createdb multimedia_events
-python -c "from models.database import init_db; init_db()"
 redis-server &
-uvicorn main:app --reload &
+uvicorn main:app --reload &      # tables are created on startup
 celery -A celery_worker.celery_app worker --loglevel=info
 ```
 
