@@ -174,10 +174,33 @@ npm run dev
 | `ENABLE_GEMINI_ANALYSIS` | Toggle Gemini video analysis on/off | `false` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.5-flash` |
 | `VIDEO_CHUNK_SECONDS` | Duration of video chunks for analysis | `300` (5 min) |
+| `OPENAI_CHAT_MODEL` | Chat model used by the AI assistant | `gpt-4o-mini` |
+| `MAX_UPLOAD_MB` | Maximum upload size in MB | `2048` |
+| `CORS_ALLOW_ORIGINS` | Comma-separated allowed browser origins | `http://localhost:5001,http://localhost:5173` |
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/multimedia_events` |
 | `CELERY_BROKER_URL` | Redis broker URL | `redis://localhost:6379/0` |
 | `CELERY_RESULT_BACKEND` | Redis result backend | `redis://localhost:6379/0` |
 | `VITE_API_BASE_URL` | Backend API URL (frontend) | `/api` |
+
+See [`.env.example`](.env.example) for a copy-paste template.
+
+## Testing
+
+```bash
+# Backend — pure-Python unit tests (no ML stack required)
+cd backend
+pip install pytest
+pytest
+
+# Frontend — type-check and production build
+cd frontend
+npm install
+npx tsc --noEmit
+npm run build
+```
+
+Continuous integration runs both suites on every push and pull request
+(see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## License
 
