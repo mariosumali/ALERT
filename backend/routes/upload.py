@@ -104,7 +104,11 @@ async def upload_file(file: UploadFile = File(...)):
             "message": "File uploaded successfully. Processing started.",
             "status": "processing"
         })
-    
+
+    except HTTPException:
+        # Preserve intentional status codes (415/413/400/...) instead of
+        # masking them as a generic 500.
+        raise
     except Exception as e:
         error_trace = traceback.format_exc()
         print(f"Upload error: {str(e)}")
